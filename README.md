@@ -30,7 +30,7 @@ Button mappings and system settings are configured in `include/config.h` and `sr
 
 ### Key Configuration Areas
 
-- **PS3 Controller MAC addresses**: Set your specific controller addresses
+- **PS3 Controller MAC addresses**: Set in `include/controller_macs.h` (see Build Instructions)
 - **Drive speeds**: Normal and overspeed settings
 - **Button mappings**: Table-driven approach for easy customization
 - **Audio/visual settings**: Volume and brightness controls
@@ -45,6 +45,12 @@ Button mappings and system settings are configured in `include/config.h` and `sr
 ## Build Instructions
 
 This is a PlatformIO project; run these from the repository root.
+
+First-time setup: your PS3 controller MAC addresses live in `include/controller_macs.h`, which is gitignored so they never land in the repository. Create it from the template and fill in your addresses; the build stops with an error until it exists.
+
+```bash
+cp include/controller_macs.example.h include/controller_macs.h
+```
 
 ```bash
 pio run                                  # Build firmware

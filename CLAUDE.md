@@ -40,7 +40,8 @@ The script updates existing rows, adds rows for new combinations, backs up the s
 ## Architecture
 
 - `src/main.cpp`: controller setup, fault detection, drive/dome motor control, and the function-code `switch` that sends serial commands
-- `src/config.cpp` / `include/config.h`: controller MAC addresses, speeds, baud rates, and the table-driven button mappings (`footButtonMappings`, `domeButtonMappings`)
+- `src/config.cpp` / `include/config.h`: speeds, baud rates, and the table-driven button mappings (`footButtonMappings`, `domeButtonMappings`)
+- `include/controller_macs.h`: the PS3 controller MAC addresses, which are the only check on who can connect and drive. It is gitignored; `include/controller_macs.example.h` is the committed template. Never commit real MAC addresses (or the Bluetooth dongle's address) anywhere in this repo.
 - `lib/`: bundled USB Host Shield (PS3BT) and Sabertooth libraries. The SyRen dome controller is driven through the `Sabertooth` class in packetized serial mode. `main.cpp` includes Sabertooth by relative path, so `platformio.ini` sets `src_dir = .` and compiles `src/` plus `lib/Sabertooth` through `build_src_filter`.
 
 ### Serial Interfaces
