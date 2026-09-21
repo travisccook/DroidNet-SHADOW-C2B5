@@ -8,7 +8,7 @@ Usage:
     python3 update_control_mapping.py <excel_file> <config_cpp_file>
     
 Example:
-    python3 update_control_mapping.py ../../Reference/ControlMapping.xlsx ../../SHADOWC2B5/src/config.cpp
+    python3 update_control_mapping.py ../../Reference/ControlMapping.xlsx ../../src/config.cpp
 """
 
 import sys

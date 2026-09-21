@@ -23,7 +23,7 @@
 // =======================================================================================
 //                                    +C2B5
 //                        Modified By: Travis Cook (travisccook)
-//                 Repository: https://github.com/travisccook/C2B5
+//                 Repository: https://github.com/travisccook/SHADOW-C2B5
 //
 //         This code is a heavily modified version of the SHADOW+MD system. As my own
 //         droid, C2-B5, evolved it became clear that all I really needed SHADOW to do
