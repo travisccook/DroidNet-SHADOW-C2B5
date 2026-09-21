@@ -58,8 +58,7 @@ Each build also copies the firmware to `build/SHADOWC2B5_<timestamp>.hex` and up
 ## Dependencies
 
 - USB Host Shield 2.0 library, including PS3BT (`lib/USB_Host_Shield`, included in project)
-- Sabertooth library (`lib/Sabertooth`, included in project)
-- SyRenSimplified library (`lib/SyRenSimplified`, included in project)
+- Sabertooth library (`lib/Sabertooth`, included in project); also drives the SyRen dome controller in packetized serial mode
 
 ## Button Mapping
 
@@ -77,7 +76,7 @@ Requires openpyxl (`pip3 install openpyxl`). The script backs up the spreadsheet
 ## Repository Layout
 
 - `src/`, `include/`: firmware sources and configuration
-- `lib/`: bundled libraries (USB Host Shield, Sabertooth, SyRenSimplified)
+- `lib/`: bundled libraries (USB Host Shield, Sabertooth)
 - `Reference/`: original SHADOW+MD sketches, pinout, controller diagrams, control mapping (reference only)
 - `WIPDocs/`: working notes and helper scripts
 - `scripts/post_build.py`: PlatformIO post-build step that copies firmware into `build/`

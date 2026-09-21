@@ -41,7 +41,7 @@ The script updates existing rows, adds rows for new combinations, backs up the s
 
 - `src/main.cpp`: controller setup, fault detection, drive/dome motor control, and the function-code `switch` that sends serial commands
 - `src/config.cpp` / `include/config.h`: controller MAC addresses, speeds, baud rates, and the table-driven button mappings (`footButtonMappings`, `domeButtonMappings`)
-- `lib/`: bundled USB Host Shield (PS3BT), Sabertooth, and SyRenSimplified libraries. `main.cpp` includes Sabertooth by relative path, so `platformio.ini` sets `src_dir = .` and compiles `src/` plus those libraries through `build_src_filter`.
+- `lib/`: bundled USB Host Shield (PS3BT) and Sabertooth libraries. The SyRen dome controller is driven through the `Sabertooth` class in packetized serial mode. `main.cpp` includes Sabertooth by relative path, so `platformio.ini` sets `src_dir = .` and compiles `src/` plus `lib/Sabertooth` through `build_src_filter`.
 
 ### Serial Interfaces
 
