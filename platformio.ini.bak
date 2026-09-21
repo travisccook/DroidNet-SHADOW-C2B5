@@ -1,0 +1,56 @@
+; PlatformIO Project Configuration File
+;
+;   Build options: build flags, source filter
+;   Upload options: custom upload port, speed and extra flags
+;   Library options: dependencies, extra library storages
+;   Advanced options: extra scripting
+;
+; Please visit documentation for the other options and examples
+; https://docs.platformio.org/page/projectconf.html
+
+[env:SHADOWMDC2B5]
+platform = atmelavr
+framework = arduino
+board = megaADK
+monitor_speed = 115200
+
+; Set build flags specific to this board
+build_flags = 
+    -D BOARD_SHADOWMDC2B5 
+    -D ENABLE_UHS_DEBUGGING=0
+    -I lib/Sabertooth
+    -I lib/SyRenSimplified
+
+; Set source filter to include library implementation files
+build_src_filter = 
+    +<src/*.cpp>
+    +<lib/Sabertooth/*.cpp>
+    +<lib/SyRenSimplified/*.cpp>
+
+; Upload settings for improved reliability
+upload_speed = 57600
+upload_flags = 
+    -V
+    -R
+    -t
+    10
+
+; Include directories
+include_dirs =
+    include
+    ../lib
+    lib
+    lib/Sabertooth
+    lib/SyRenSimplified
+
+; Extra library directories
+lib_deps =
+    featherfly/SoftwareSerial @ ^1.0
+    chris--a/Keypad @ ^3.1.1
+    adafruit/Adafruit NeoPixel @ ^1.12.0
+    adafruit/Adafruit PWM Servo Driver Library @ ^2.4.1
+    https://github.com/felis/USB_Host_Shield_2.0.git
+
+lib_extra_dirs =
+    lib
+    ../lib

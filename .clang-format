@@ -1,0 +1,76 @@
+# C2B5 Project Clang-Format Configuration
+# Embedded-friendly C++ formatting for Arduino/ESP32 development
+
+# Base style similar to Arduino conventions
+BasedOnStyle: Google
+
+# Indentation
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+IndentCaseLabels: true
+IndentPPDirectives: None
+
+# Line length - relaxed for embedded development
+ColumnLimit: 120
+
+# Brace wrapping - K&R style common in Arduino
+BreakBeforeBraces: Attach
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+
+# Spacing
+SpaceAfterCStyleCast: true
+SpacesInParentheses: false
+SpacesInSquareBrackets: false
+SpaceBeforeAssignmentOperators: true
+SpaceBeforeParens: ControlStatements
+
+# Alignment - helps readability in embedded code
+AlignConsecutiveMacros: true
+AlignConsecutiveAssignments: false
+AlignConsecutiveDeclarations: false
+AlignEscapedNewlines: Left
+AlignOperands: true
+AlignTrailingComments: true
+
+# Keep Arduino-style formatting
+AllowShortBlocksOnASingleLine: false
+AllowShortCaseLabelsOnASingleLine: false
+AlwaysBreakAfterReturnType: None
+AlwaysBreakTemplateDeclarations: Yes
+
+# Pointer alignment - right aligned (Arduino style)
+PointerAlignment: Right
+ReferenceAlignment: Right
+
+# Include sorting - preserve Arduino include order
+SortIncludes: false
+
+# Preserve existing empty lines
+MaxEmptyLinesToKeep: 2
+
+# Constructor initializer formatting
+ConstructorInitializerAllOnOneLineOrOnePerLine: true
+ConstructorInitializerIndentWidth: 4
+
+# Comments
+ReflowComments: false
+CommentPragmas: '^ (NOLINT|TODO|FIXME|NOTE|HACK|XXX):'
+
+# Penalties - prefer readable code over compact
+PenaltyBreakBeforeFirstCallParameter: 100
+PenaltyBreakComment: 300
+PenaltyBreakString: 1000
+PenaltyExcessCharacter: 1000000
+
+# C++11 features
+Standard: c++11
+Cpp11BracedListStyle: true
+
+# Preprocessor
+SortUsingDeclarations: false
+
+# Keep simple blocks together
+KeepEmptyLinesAtTheStartOfBlocks: false
