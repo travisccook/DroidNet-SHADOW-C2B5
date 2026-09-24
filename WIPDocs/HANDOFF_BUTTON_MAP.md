@@ -14,8 +14,11 @@ Claims below are marked **VERIFIED** (with how) or **ASSUMED**. Re-check anythin
 Section 4 is partly done. Results are on
 [PR #1](https://github.com/travisccook/SHADOW-C2B5/pull/1#issuecomment-5817847387).
 
-**The droid runs `e3f6b82`.** That's PR #1 plus #2, which changed the build flag to `!python3` because macOS has no
-`python`. `main` has since gained #3, which only changes the boot log and `CLAUDE.md`, so re-flashing is optional.
+**The droid runs `6b3f519`** (flashed 16:29Z). That's PR #1, plus #2 (the build flag is now `!python3`, because
+macOS has no `python`), #3 (a boot-log line break) and #4 (docs). Later commits on `main` so far are docs only.
+
+**How the owner works:** commit straight to `main`, with no branches or PRs, because they're the sole developer. This
+replaces the branch/PR advice in sections 2, 4 and 7.
 
 **VERIFIED on the droid:**
 
@@ -25,6 +28,7 @@ Section 4 is partly done. Results are on
 - every verb
 - CRCs on both legs
 - EEPROM persistence across a Mega reset
+- `@SM` over the Mega's USB port (step 11)
 
 **Still to do** (the controllers were away):
 
@@ -33,6 +37,9 @@ Section 4 is partly done. Results are on
 - a full power cycle (step 10)
 
 State left on the droid: EEPROM formatted, all slots on their defaults (SUM `65096899`), EVENTS off.
+
+**WCB 1 S2 has broadcast output off** (`?BCAST,OUT,S2,OFF`, the owner's OK). Mesh broadcasts no longer reach
+SHADOW; routed `;S2...` lines still do. It's in WCB 1's NVS, and the hourly backups capture it.
 
 **Before today's flash:**
 
