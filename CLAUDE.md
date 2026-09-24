@@ -22,9 +22,12 @@ pio run -t upload --upload-port /dev/ttyACM0
 pio device monitor --baud 115200         # Serial monitor
 pio run -t clean                         # Clean
 pio check                                # clang-tidy
+pio test -e native                       # Host unit tests (lib/WdpAnnounce)
 ```
 
-The only environment is `SHADOWC2B5`. Each build also copies the firmware to `build/` via `scripts/post_build.py`.
+The firmware environment is `SHADOWC2B5`, the default. Each build also copies the firmware to `build/` via
+`scripts/post_build.py`, and `scripts/git_rev.py` defines `GIT_REV` (the short commit SHA, `-dirty` if modified).
+`native` runs host unit tests only; the firmware env ignores all test suites, so `pio test` never uploads to the Mega.
 
 ### Updating Control Mapping Documentation
 
@@ -47,7 +50,7 @@ The script updates existing rows, adds rows for new combinations, backs up the s
 ### Serial Interfaces
 
 - **Serial**: 115200 debug output
-- **Serial1 (9600)**: commands to the WCB (Wireless Communication Board), which routes them to the HCR Vocalizer, holoprojectors, and other boards
+- **Serial1 (9600)**: commands to the WCB (Wireless Communication Board), which routes them to the HCR Vocalizer, holoprojectors, and other boards. Every 25-30 s it also carries a WDP Device Announce, `@WDP1 {"type":"Shadow","fw":"<GIT_REV>"}\r` (`lib/WdpAnnounce`, `wdpAnnounceTick()`), sent only when the TX buffer can take the whole line. WCB 1 labels the port "Shadow" in the mesh; `?WDP,DA` on WCB 1 shows `fw`.
 - **Serial2 (9600)**: Sabertooth (feet) and SyRen (dome) packetized serial
 - **Serial3**: unused
 
