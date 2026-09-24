@@ -218,8 +218,8 @@ against the real droid. Then ask the user whether to merge the PR. If anything g
 
 The DroidNet session builds the Pi side: a backend (`ShadowLink`) on DroidNet's existing WCB listener, HTTP/SSE
 endpoints, and the SHADOW tab. Its docs are on DroidNetSignalBooster `main`
-([PR #8](https://github.com/travisccook/DroidNetSignalBooster/pull/8), plus a follow-up that brought discovery in
-line with section 3):
+([PR #8](https://github.com/travisccook/DroidNetSignalBooster/pull/8), and
+[PR #9](https://github.com/travisccook/DroidNetSignalBooster/pull/9), which brought discovery in line with section 3):
 
 - `docs/superpowers/specs/2026-09-24-shadow-button-map-design.md`: backend design
 - `docs/superpowers/specs/2026-09-24-shadow-button-map-ui-design.md` plus `shadow-button-map-ui/`: UI and

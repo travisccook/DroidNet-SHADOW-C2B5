@@ -212,7 +212,7 @@ The format is `ERR <code> [<VERB> [<slot>]]`.
 With `SHADOW_WDP_ANNOUNCE` defined (the default), SHADOW sends this to its WCB 0.5-3 s after boot,
 then every 25-30 s, each interval drawn at random:
 
-```
+```text
 @WDP1 {"type":"Shadow","fw":"<commit>"}
 ```
 
