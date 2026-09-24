@@ -2,7 +2,10 @@
 
 **Status:** implemented, and merged to `main` in [PR #1](https://github.com/travisccook/SHADOW-C2B5/pull/1). It is
 tested on the host, on an emulated ATmega2560 (simavr), and against the reference Pi client.
-**It has not run on the droid yet.** The DroidNet side is designed but not built. Its design and UI live in the
+**It runs on the droid** (`e3f6b82`, flashed 2026-09-24). Verified there: the WCB link in both directions, every
+verb, and EEPROM persistence across a reset. Not yet tested: real button presses, driving, and a power cycle
+([results on PR #1](https://github.com/travisccook/SHADOW-C2B5/pull/1#issuecomment-5817847387)). The DroidNet
+side is being built. Its design and UI live in the
 DroidNetSignalBooster repo: [backend design](https://github.com/travisccook/DroidNetSignalBooster/blob/main/docs/superpowers/specs/2026-09-24-shadow-button-map-design.md) and
 [UI design and mockup](https://github.com/travisccook/DroidNetSignalBooster/blob/main/docs/superpowers/specs/2026-09-24-shadow-button-map-ui-design.md). Work in progress is tracked in
 [HANDOFF_BUTTON_MAP.md](HANDOFF_BUTTON_MAP.md).
@@ -270,6 +273,9 @@ The library has no Arduino dependency, so it builds and tests on the host.
 - **Round trips on SHADOW's side,** from the simulator, 9600 baud: GET about 75 ms, SET about
   120 ms (250 ms for the first write, which formats the EEPROM), SUM about 185 ms, DUMP about
   4.2 s. The inbound leg adds about 1 ms per character.
+- **Round trips on the droid** (2026-09-24, WCB 1 S2, from DroidNet's listener API on the Pi to the reply in
+  its serial history): HELLO 91-129 ms, GET 107-136 ms, SUM about 140 ms, SET 205 ms (303 ms for the first
+  write), REVERT 159-175 ms, DUMP 4.41 s to `END DUMP 72`.
 - **Memory:**
   - Static SRAM is 2712 bytes, down from 3801 before this change (the tables, descriptions and
     switch strings are gone).
@@ -299,8 +305,7 @@ python3 -m unittest tools/shadowmap/test_shadowmap.py   # reference client vs. t
 
 ## Not done yet
 
-- Run it on the droid. That means flashing, checking `[WDP-DA]` shows SHADOW on the Pi's WCB, then
-  `tools/shadowmap/shadowmap.py --wcb ... dump`.
+- On the droid: real button presses, driving while editing, and a power cycle (HANDOFF_BUTTON_MAP.md §0).
 - The DroidNet tab and backend (see the [backend design](https://github.com/travisccook/DroidNetSignalBooster/blob/main/docs/superpowers/specs/2026-09-24-shadow-button-map-design.md)).
 - New WCB stored commands for volume and brightness, then map them.
 - Maybe: a "learn" mode (report a press without firing it) and a lock notice. Neither is built.

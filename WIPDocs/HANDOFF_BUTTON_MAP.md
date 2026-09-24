@@ -9,6 +9,62 @@ Claims below are marked **VERIFIED** (with how) or **ASSUMED**. Re-check anythin
 
 ---
 
+## 0. Status, 2026-09-24 afternoon (the second SHADOW-C2B5 session)
+
+Section 4 is partly done. Results are on
+[PR #1](https://github.com/travisccook/SHADOW-C2B5/pull/1#issuecomment-5817847387).
+
+**The droid runs `e3f6b82`.** That's PR #1 plus #2, which changed the build flag to `!python3` because macOS has no
+`python`. `main` has since gained #3, which only changes the boot log and `CLAUDE.md`, so re-flashing is optional.
+
+**VERIFIED on the droid:**
+
+- boot
+- the announce: `?WDP,DA` on WCB 1 shows `S2 Shadow fw e3f6b82`
+- the whole WCB path in both directions, **on port S2**
+- every verb
+- CRCs on both legs
+- EEPROM persistence across a Mega reset
+
+**Still to do** (the controllers were away):
+
+- section 4 step 5 (driving), step 6 (real presses, including foot CIRCLE+LEFT `alarm` and foot RIGHT `sadsound`)
+  and step 9 (editing while driving)
+- a full power cycle (step 10)
+
+State left on the droid: EEPROM formatted, all slots on their defaults (SUM `65096899`), EVENTS off.
+
+**Before today's flash:**
+
+- The Mega ran `e88b489`, an earlier announce-only build (branch `wdp-announce-standalone`).
+- Rollback images in `/root/shadow-backups/` on c2-body:
+  - `SHADOWC2B5_wdp_e88b489.hex` (e88b489)
+  - `shadow-pre-wdp-2026-09-24*.hex` (the original firmware)
+
+**Reaching c2-body:**
+
+- **Host key.** It was reimaged from the 2026-09-14 DroidNet image, so its SSH host key changed to ED25519
+  `SHA256:fLk1ucrsuW3AfUnto+1ulgYxd1Kh6VlM7OSiBB+VZL0`. That key is baked into
+  `DroidNetSignalBooster/images/droidnet-lite-zero2-w-debug-20260914-223145.img`, so every Pi flashed from that image
+  shares it. Verify against the image; don't turn host-key checking off.
+- **Login:** root, with the DroidNet project's standard password (see DroidNetSignalBooster's docs).
+- **Refused logins:** logins are sometimes refused. Retry only when the failure is "Permission denied".
+- **Sending `@SM` without stopping DroidNet's listener:**
+  1. `POST http://localhost/api/wcb/command` with `{"port":"/dev/ttyUSB0","command":";S2@SM ... *<crc>","timeout":0.5}`.
+     It always reports a timeout.
+  2. Read the reply from `GET /api/serial/history?port=/dev/ttyUSB0`.
+
+**WCB 1 changes:**
+
+- **Two stored commands added.** `alarm` and `sadsound` were referenced by the built-in defaults but missing from WCB 1,
+  which was already true under the old firmware. At the owner's request, both were recreated:
+  - `alarm` from `C2B5/WCB/wcb-commands-2025-07-10.json`
+  - `sadsound` from `C2B5/WIPDocs/NEWSERIAL.md`
+  - the old HCR codes converted to `;H,...`, following the conversion WCB 1's other commands went through
+- **Hourly backup.** DroidNet runs a WCB 1 `?BACKUP` every hour, at about :46 on 2026-09-24 (it's timed from boot).
+  Its parser on c2-body takes the line after each "For Configured Boards" header as the restore line. So keep EVENTS
+  off across it until DroidNet ships its fix.
+
 ## 1. What you own
 
 - **The firmware side of runtime button mapping.** DroidNet edits SHADOW's button → WCB-command mappings over the
@@ -73,8 +129,10 @@ flashed.
   0.9 ms (a pass during `DUMP`). A pass that sends the announce takes 0.24 ms. `test_avr` fails if any pass reaches
   1 ms. VERIFIED under simavr only; ASSUMED to hold on hardware.
 
-**Never observed on real hardware.** All ASSUMED, from reading the WCB 6.2.1 source
-(`travisccook/Wireless_Communication_Board-WCB` at `66845b9`):
+**Never observed on real hardware** when this was written. Update: all five were VERIFIED on the droid on 2026-09-24
+(section 0). The one exception: after a quick reflash, the WCB prints no new `[WDP-DA]` line, because SHADOW's
+record doesn't expire in under 90 s; `?WDP,DA` shows the new `fw`. Originally ASSUMED, from reading the WCB 6.2.1
+source (`travisccook/Wireless_Communication_Board-WCB` at `66845b9`):
 
 - that the WCB delivers `;S<x>@SM ...` from the Pi to SHADOW's Serial1 as `@SM ...\r`
 - that it prints SHADOW's `;S0@SM ...` replies on its USB port
@@ -258,11 +316,11 @@ endpoints, and the SHADOW tab. Its docs are on DroidNetSignalBooster `main`
 
 ## 8. Open questions for the user
 
-1. Is the WCB 1 → SHADOW wire (to the Mega's RX1, pin 19) connected? If not, it has to be added for edits over the
-   WCB.
-2. From the 2026-09-23 handoff, still open:
-   - label SHADOW's WCB port (`?LABEL,S<x>,Shadow`)?
-   - a divider on SHADOW's TX to the WCB?
-   - is SHADOW fed on VIN or 5 V? That decides the USB power blocker.
-3. Add a learn mode for shows?
+1. ~~Is the WCB 1 → SHADOW wire (to the Mega's RX1, pin 19) connected?~~ Yes: `@SM` requests on S2 are answered
+   (2026-09-24).
+2. From the 2026-09-23 handoff:
+   - ~~label SHADOW's WCB port?~~ Done: WCB 1 S2 is labeled `Shadow` (`?LABEL,S2,Shadow`, 2026-09-24 15:07Z).
+   - a divider on SHADOW's TX to the WCB? Still open.
+   - is SHADOW fed on VIN or 5 V? That decides the USB power blocker. Still open.
+3. ~~Add a learn mode for shows?~~ Not for now (the owner, via the DroidNet session, 2026-09-24); maybe later.
 4. Should the new volume and brightness commands become built-in defaults, or stay DroidNet-only?
