@@ -14,8 +14,10 @@ Claims below are marked **VERIFIED** (with how) or **ASSUMED**. Re-check anythin
 Section 4 is partly done. Results are on
 [PR #1](https://github.com/travisccook/SHADOW-C2B5/pull/1#issuecomment-5817847387).
 
-**The droid runs `6b3f519`** (flashed 16:29Z). That's PR #1, plus #2 (the build flag is now `!python3`, because
-macOS has no `python`), #3 (a boot-log line break) and #4 (docs). Later commits on `main` so far are docs only.
+**The droid runs `af4db5d`** (flashed 2026-09-24 about 17:05Z). That's PR #1, plus #2 (the build flag is now
+`!python3`, because macOS has no `python`), #3 (a boot-log line break), and the line-reader fix for the lost first
+request after power-up (below). That fix was verified on hardware through the USB port, which uses the same
+reader: a request with leading noise bytes is answered, and junk before `@SM` or noise inside a line still drops it.
 
 **How the owner works:** commit straight to `main`, with no branches or PRs, because they're the sole developer. This
 replaces the branch/PR advice in sections 2, 4 and 7.
@@ -33,8 +35,8 @@ replaces the branch/PR advice in sections 2, 4 and 7.
   off, `alarm`/`sadsound`) all survived. But the **first `@SM` request after power-up got no reply**; the retry and
   everything after answered normally. The likely cause (not proven): the listener opening ttyUSB0 about 35 s after
   power-on resets WCB 1, the reset glitches S2's TX, and SHADOW's line reader is left holding an unterminated noise
-  byte, so it skips the next line. With broadcast output off, nothing else ends that line first. Clients already
-  resend on silence.
+  byte, so it skips the next line. With broadcast output off, nothing else ends that line first. Fixed in `af4db5d`:
+  leading noise bytes are now ignored. Not yet re-checked with another power cycle.
 
 **Still to do** (the controllers were away):
 
