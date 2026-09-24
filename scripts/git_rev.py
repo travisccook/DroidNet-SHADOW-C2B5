@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Prints the build flag that sets SHADOW_FW_VERSION to the git commit being built.
 
-platformio.ini runs it with `build_flags = !python scripts/git_rev.py`. The version is the
+platformio.ini runs it with `build_flags = !python3 scripts/git_rev.py`. The version is the
 short commit hash, with "+" appended when tracked files differ from that commit, so a build
 from an edited tree can't pass for the commit. It shows in @SM READY and in the WCB device
 announce, and main.cpp's static_assert holds it to 11 characters.
