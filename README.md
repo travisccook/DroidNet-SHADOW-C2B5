@@ -75,14 +75,7 @@ Each build also copies the firmware to `build/SHADOWC2B5_<timestamp>.hex` and up
 
 Each button combination sends a WCB stored command. The built-in defaults are in `src/default_mappings.cpp`; DroidNet changes them at runtime over the WCB link, and the changes are kept in EEPROM (see `WIPDocs/COMMAND_MAPPING_DESIGN.md`).
 
-The printable mapping lives in `Reference/ControlMapping.xlsx` (and `.pdf`). After changing `src/default_mappings.cpp`, update the spreadsheet with:
-
-```bash
-cd WIPDocs/scripts
-python3 update_control_mapping.py ../../Reference/ControlMapping.xlsx ../../src/default_mappings.cpp
-```
-
-Requires openpyxl (`pip3 install openpyxl`). The script backs up the spreadsheet before changing it.
+DroidNet shows the live mapping. The old printable spreadsheet (`Reference/ControlMapping.xlsx`) is retired and no longer kept up to date.
 
 ## Repository Layout
 

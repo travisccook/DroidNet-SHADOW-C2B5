@@ -29,17 +29,6 @@ python3 -m unittest tools/shadowmap/test_shadowmap.py   # Pi-side client vs. the
 
 `SHADOWC2B5` is the firmware environment (the default); `native` and `simavr` are test-only. Each firmware build also copies the firmware to `build/` via `scripts/post_build.py`. If a simavr test run hangs, that test program has probably run out of the Mega's 8 KB of SRAM (on AVR every Unity string literal lives in RAM): split the suite.
 
-### Updating Control Mapping Documentation
-
-When the built-in button mappings change in `src/default_mappings.cpp`, update the Excel documentation:
-
-```bash
-cd WIPDocs/scripts
-python3 update_control_mapping.py ../../Reference/ControlMapping.xlsx ../../src/default_mappings.cpp
-```
-
-The script updates existing rows, adds rows for new combinations, backs up the spreadsheet first, and keeps its formatting. Requires openpyxl (`pip3 install openpyxl`).
-
 ## Architecture
 
 - `src/main.cpp`: controller setup, fault detection, drive/dome motor control; reads the controllers into `sm::PadState` and hands button mapping to `sm::Runtime`
@@ -69,7 +58,7 @@ The script updates existing rows, adds rows for new combinations, backs up the s
 
 1. **Safety Critical Code**: The main control loop must never be blocked. Motor control and fault detection require real-time responses.
 2. **Serial Communication**: All inter-board communication uses 9600 baud. Higher rates have proven unreliable in the electrically noisy droid environment.
-3. **Button Mapping**: DroidNet changes mappings at runtime (stored in EEPROM, which survives reboots and uploads). To change the built-in defaults, edit `src/default_mappings.cpp`, run the tests, then update the control mapping spreadsheet. EEPROM holds the mapping (1360 bytes from address 0); anything else that uses EEPROM must start after that.
+3. **Button Mapping**: DroidNet changes mappings at runtime (stored in EEPROM, which survives reboots and uploads). To change the built-in defaults, edit `src/default_mappings.cpp` and run the tests. DroidNet shows the live mapping; the old control-mapping spreadsheet is retired. EEPROM holds the mapping (1360 bytes from address 0); anything else that uses EEPROM must start after that.
 
 ## Development Best Practices
 

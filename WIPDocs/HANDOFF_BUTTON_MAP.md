@@ -238,11 +238,9 @@ it on a branch and PR.
 
 - **Volume and brightness.** The user will create new WCB stored commands on WCB 1. They get mapped at runtime
   (DroidNet, or `shadowmap.py ... set D PS UP <key>`). Only add them to `src/default_mappings.cpp` if the user wants
-  them as defaults, and if you do, run the tests and the spreadsheet script.
-- **Spreadsheet.** `WIPDocs/scripts/update_control_mapping.py` now reads `src/default_mappings.cpp`. CLAUDE.md says
-  never to change `Reference/`, yet the script writes `Reference/ControlMapping.xlsx`, so ask the user before you
-  run it. The sheet is already stale for dome L2+DOWN (it says UNUSED; the firmware sends `redlight`). VERIFIED
-  by running the script on a copy.
+  them as defaults, and if you do, run the tests.
+- **Spreadsheet: retired** (the owner, 2026-09-24). DroidNet replaces it. The update script is gone, and
+  `Reference/ControlMapping.xlsx` is left as it is.
 - **Protocol requests from DroidNet.** See section 7. One idea on the table is a "learn" mode: report a press
   without firing it. It needs the user's go-ahead and an automatic timeout so the droid can never be left muted.
 - **Optional tidy-up.** `?BCAST,OUT,S<x>,OFF` on SHADOW's WCB port stops mesh broadcasts reaching SHADOW. The

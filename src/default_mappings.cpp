@@ -26,8 +26,6 @@
 //   L2 + CROSS / L2 + CIRCLE  - dome automation off / on (CROSS/CIRCLE aren't buttons here)
 //   L2 + stick                - dome rotation (only when no dome controller is connected)
 //   L1 or L2 held             - stops the foot motors
-//
-// After changing this file, update the control mapping spreadsheet (see CLAUDE.md).
 // =======================================================================================
 
 #define FOOT(mod, btn) sm::slotIndex(sm::Ctrl::F, sm::Mod::mod, sm::Btn::btn)
