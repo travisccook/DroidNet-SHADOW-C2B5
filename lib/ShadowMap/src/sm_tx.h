@@ -35,7 +35,9 @@ class TxQueue {
             if (chunk > room)
                 chunk = static_cast<uint8_t>(room);
             out.write(reinterpret_cast<const uint8_t *>(buf_ + head_), chunk);
-            head_ = static_cast<uint8_t>((head_ + chunk) % kCapacity);
+            head_ = static_cast<uint8_t>(head_ + chunk);
+            if (head_ == kCapacity)
+                head_ = 0;
             used_ = static_cast<uint8_t>(used_ - chunk);
         }
     }
@@ -44,7 +46,8 @@ class TxQueue {
     void put(char c);
 
     char buf_[kCapacity] = {};
-    uint8_t head_ = 0;
+    uint8_t head_ = 0;  // next byte to send
+    uint8_t tail_ = 0;  // next free byte
     uint8_t used_ = 0;
 };
 

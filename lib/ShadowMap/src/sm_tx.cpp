@@ -5,7 +5,9 @@
 namespace sm {
 
 void TxQueue::put(char c) {
-    buf_[(head_ + used_) % kCapacity] = c;
+    buf_[tail_] = c;
+    if (++tail_ == kCapacity)  // no '%': division is slow on AVR
+        tail_ = 0;
     ++used_;
 }
 

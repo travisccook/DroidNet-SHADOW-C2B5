@@ -99,4 +99,9 @@ const sm::DefaultMapping defaultButtonMappings[] PROGMEM = {
 #undef FOOT
 #undef DOME
 
-const uint8_t defaultButtonMappingsCount = sizeof(defaultButtonMappings) / sizeof(defaultButtonMappings[0]);
+template <typename T, size_t N>
+constexpr size_t countOf(const T (&array)[N]) {
+    return static_cast<void>(array), N;  // C++11 constexpr: a single return statement
+}
+
+const uint8_t defaultButtonMappingsCount = countOf(defaultButtonMappings);
