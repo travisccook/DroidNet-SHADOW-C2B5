@@ -196,6 +196,18 @@ void sendError(ReplyPort &port, PGM_P code, const char *verb, uint8_t slot) {
     emit(out, port);
 }
 
+char padsToken(uint8_t pads, char *out) {
+    uint8_t n = 0;
+    if (pads & 1)
+        out[n++] = 'F';
+    if (pads & 2)
+        out[n++] = 'D';
+    if (n == 0)
+        out[n++] = '-';
+    out[n] = '\0';
+    return out[0];
+}
+
 PGM_P sourceToken(Source src) {
     switch (src) {
         case Source::Eeprom:
@@ -319,6 +331,9 @@ bool Protocol::handleLine(const char *line, ReplyPort &port) {
         Out out;
         out.p(PSTR("@SM READY v")).u(kProtocolVersion).p(PSTR(" fw=")).s(fw_).p(PSTR(" slots=")).u(kSlotCount);
         out.p(PSTR(" gen=")).u(store_.generation()).p(PSTR(" fmt=")).c(store_.formatted() ? '1' : '0');
+        char pads[3];
+        padsToken(pads_, pads);
+        out.p(PSTR(" pads=")).s(pads);
         emit(out, port);
         return true;
     }
@@ -349,10 +364,12 @@ bool Protocol::handleLine(const char *line, ReplyPort &port) {
             return true;
         }
         const bool on = argv[1][0] == '1';
-        if (on)
+        if (on) {
             eventPort_ = &port;
-        else if (eventPort_ == &port)
+            padsReported_ = pads_;
+        } else if (eventPort_ == &port) {
             eventPort_ = nullptr;
+        }
         Out out;
         out.p(PSTR("@SM OK EVENTS ")).c(on ? '1' : '0');
         emit(out, port);
@@ -360,17 +377,20 @@ bool Protocol::handleLine(const char *line, ReplyPort &port) {
     }
 
     const bool isSet = strcmp_P(verb, PSTR("SET")) == 0;
+    const bool isRevert = strcmp_P(verb, PSTR("REVERT")) == 0;
+    const bool isSum = strcmp_P(verb, PSTR("SUM")) == 0;
     const bool isDump = strcmp_P(verb, PSTR("DUMP")) == 0;
     const bool isDefaults = strcmp_P(verb, PSTR("DEFAULTS")) == 0;
     const bool isPrefix = strcmp_P(verb, PSTR("PREFIX")) == 0;
     const bool isSuffix = strcmp_P(verb, PSTR("SUFFIX")) == 0;
-    if (!(isSet || isDump || isDefaults || isPrefix || isSuffix)) {
+    if (!(isSet || isRevert || isSum || isDump || isDefaults || isPrefix || isSuffix)) {
         sendError(port, PSTR("verb"), verb, kNoSlot);
         return true;
     }
 
     uint8_t slot = kNoSlot;
-    if (isSet && (argc != 5 || !parseSlotArgs(argv + 1, &slot))) {
+    if ((isSet && (argc != 5 || !parseSlotArgs(argv + 1, &slot))) ||
+        (isRevert && (argc != 4 || !parseSlotArgs(argv + 1, &slot)))) {
         sendError(port, PSTR("slot"), verb, kNoSlot);
         return true;
     }
@@ -379,14 +399,20 @@ bool Protocol::handleLine(const char *line, ReplyPort &port) {
         return true;
     }
 
-    if (isDump) {
+    if (isDump || isSum) {
         if (argc != 1) {
             sendError(port, PSTR("args"), verb, kNoSlot);
             return true;
         }
-        op_ = Op::Dump;
+        op_ = isDump ? Op::Dump : Op::Sum;
         opPort_ = &port;
         dumpNext_ = 0;
+        sumCrc_ = kCrc32Init;
+        return true;
+    }
+
+    if (isRevert) {
+        startOp(Op::Revert, port, store_.beginRevert(slot), verb, slot);
         return true;
     }
 
@@ -454,8 +480,38 @@ void Protocol::startOp(Op op, ReplyPort &port, MapStore::Result r, const char *v
 }
 
 void Protocol::service() {
+    servicePads();
     if (op_ == Op::None || opPort_ == nullptr)
         return;
+
+    if (op_ == Op::Sum) {
+        // CRC32 of every SLOT line's text after "@SM SLOT " (as DUMP sends it), each followed
+        // by '\n': one slot per pass, one reply at the end.
+        if (dumpNext_ < kSlotCount) {
+            char key[kKeyBuf];
+            Source src = Source::Default;
+            if (!store_.keyForSlot(dumpNext_, key, &src))
+                return;  // EEPROM busy: next pass
+            char body[Protocol::kMaxLine + 1];
+            const uint8_t n = formatSlotBody(body, sizeof(body), dumpNext_, key, src);
+            for (uint8_t i = 0; i < n; ++i)
+                sumCrc_ = crc32Update(sumCrc_, static_cast<uint8_t>(body[i]));
+            sumCrc_ = crc32Update(sumCrc_, '\n');
+            ++dumpNext_;
+            return;
+        }
+        if (!opPort_->canSend(kMaxLine))
+            return;
+        Out out;
+        const uint32_t crc = crc32Final(sumCrc_);
+        out.p(PSTR("@SM SUM "));
+        for (int8_t shift = 28; shift >= 0; shift -= 4)
+            out.c(kHexDigits[(crc >> shift) & 0x0F]);
+        out.p(PSTR(" slots=")).u(kSlotCount);
+        emit(out, *opPort_);
+        op_ = Op::None;
+        return;
+    }
 
     if (op_ == Op::Dump) {
         if (!opPort_->canSend(kMaxLine))
@@ -489,6 +545,9 @@ void Protocol::service() {
 void Protocol::sendOpReply(bool ok) {
     PGM_P verb = PSTR("SET");
     switch (op_) {
+        case Op::Revert:
+            verb = PSTR("REVERT");
+            break;
         case Op::Defaults:
             verb = PSTR("DEFAULTS");
             break;
@@ -504,7 +563,7 @@ void Protocol::sendOpReply(bool ok) {
     Out out;
     if (!ok) {
         out.p(PSTR("@SM ERR eeprom ")).p(verb);
-        if (op_ == Op::Set)
+        if (op_ == Op::Set || op_ == Op::Revert)
             out.c(' ').slot(opSlot_);
         emit(out, *opPort_);
         return;
@@ -512,6 +571,8 @@ void Protocol::sendOpReply(bool ok) {
     out.p(PSTR("@SM OK ")).p(verb);
     if (op_ == Op::Set)
         out.c(' ').slot(opSlot_).c(' ').key(opArg_);
+    else if (op_ == Op::Revert)
+        out.c(' ').slot(opSlot_);
     else if (op_ == Op::Defaults)
         out.p(PSTR(" gen=")).u(store_.generation());
     else
@@ -524,21 +585,59 @@ bool Protocol::sendSlotLine(uint8_t slot, ReplyPort &port) {
     Source src = Source::Default;
     if (!store_.keyForSlot(slot, key, &src))
         return false;
+    char body[kMaxLine + 1];
+    formatSlotBody(body, sizeof(body), slot, key, src);
     Out out;
-    out.p(PSTR("@SM SLOT ")).slot(slot).c(' ').key(key).c(' ').p(sourceToken(src));
-    const Reserved why = slotReserved(slot);
-    if (why != Reserved::No)
-        out.c(' ').p(reservedToken(why));
+    out.p(PSTR("@SM SLOT ")).s(body);
     emit(out, port);
     return true;
 }
 
-void Protocol::notifyPress(uint8_t slot, const char *key, Source src) {
+// "<slot> <key|-> <source> def=<default|->", or "<slot> - reserved res=<reason>".
+uint8_t Protocol::formatSlotBody(char *dst, uint8_t cap, uint8_t slot, const char *key, Source src) const {
+    Out out;
+    out.slot(slot).c(' ').key(key).c(' ').p(sourceToken(src));
+    const Reserved why = slotReserved(slot);
+    if (why != Reserved::No) {
+        out.p(PSTR(" res=")).p(reservedToken(why));
+    } else {
+        char def[kKeyBuf];
+        store_.defaultKey(slot, def);
+        out.p(PSTR(" def=")).key(def);
+    }
+    const uint8_t n = out.len() < cap ? out.len() : static_cast<uint8_t>(cap - 1);
+    memcpy(dst, out.str(), n);
+    dst[n] = '\0';
+    return n;
+}
+
+void Protocol::notifyPress(uint8_t slot, const char *key, Source src, bool modFromOther) {
     if (eventPort_ == nullptr || !eventPort_->canSend(kMaxLine))
         return;
     Out out;
     out.p(PSTR("@SM PRESS ")).slot(slot).c(' ').key(key).c(' ').p(sourceToken(src));
+    if (modFromOther)
+        out.p(PSTR(" from=")).c(slotCtrl(slot) == Ctrl::F ? 'D' : 'F');
+    const Reserved why = slotReserved(slot);
+    if (why != Reserved::No)
+        out.p(PSTR(" res=")).p(reservedToken(why));
     emit(out, *eventPort_);
+}
+
+void Protocol::setPads(bool footConnected, bool domeConnected) {
+    pads_ = static_cast<uint8_t>((footConnected ? 1 : 0) | (domeConnected ? 2 : 0));
+}
+
+// With EVENTS on, one "@SM CTL <F|D> <0|1>" per controller that connected or dropped.
+void Protocol::servicePads() {
+    if (eventPort_ == nullptr || pads_ == padsReported_ || !eventPort_->canSend(kMaxLine))
+        return;
+    const uint8_t changed = static_cast<uint8_t>(pads_ ^ padsReported_);
+    const uint8_t bit = (changed & 1) ? 1 : 2;
+    Out out;
+    out.p(PSTR("@SM CTL ")).c(bit == 1 ? 'F' : 'D').c(' ').c((pads_ & bit) ? '1' : '0');
+    emit(out, *eventPort_);
+    padsReported_ = static_cast<uint8_t>(padsReported_ ^ bit);
 }
 
 }  // namespace sm

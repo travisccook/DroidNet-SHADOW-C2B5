@@ -10,7 +10,8 @@
 // power cut while a header is being written leaves the previous one in force. Each slot
 // carries its own CRC, so a slot that fails it (a power cut mid-write, or a slot written
 // under an older generation) falls back to its built-in default without affecting the
-// others. Bumping the generation (DEFAULTS) invalidates every slot with one header write.
+// others. Bumping the generation (DEFAULTS) invalidates every slot with one header write;
+// REVERT erases a single slot the same way.
 //
 // All writes happen in step(), one byte per call and only when the EEPROM is idle, so the
 // main loop never waits on EEPROM. Bytes that already hold the right value are skipped and
@@ -74,6 +75,7 @@ class MapStore {
 
     // Start a write. Only one runs at a time; watch takeCompletion() for the outcome.
     Result beginSet(uint8_t slot, const char *key);  // "" clears the slot
+    Result beginRevert(uint8_t slot);                // back to the built-in default
     Result beginDefaults();
     Result beginPrefix(const char *prefix);
     Result beginSuffix(const char *suffix);
@@ -92,7 +94,7 @@ class MapStore {
     static constexpr uint8_t kMaxRetries = 1;
 
     enum class Phase : uint8_t { Idle, Write, Verify };
-    enum class JobKind : uint8_t { Header, Slot };
+    enum class JobKind : uint8_t { Header, Slot, SlotErase };
 
     uint16_t headerAddr(uint8_t index) const { return static_cast<uint16_t>(base_ + index * kHeaderSize); }
     uint16_t slotAddr(uint8_t slot) const {
@@ -101,6 +103,7 @@ class MapStore {
 
     void startHeaderJob(uint8_t index, uint16_t seq, uint16_t gen, const char *prefix, const char *suffix);
     void startSlotJob(uint8_t slot, const char *key);
+    void startEraseJob(uint8_t slot);
     void finishJob(bool ok);
     void applyHeader(const uint8_t *hdr, uint8_t index);
     bool readSlotRecord(uint8_t slot, uint8_t rec[kSlotSize]);

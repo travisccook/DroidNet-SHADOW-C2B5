@@ -215,6 +215,8 @@ bool MapStore::keyForSlot(uint8_t slot, char out[kKeyBuf], Source *src) {
         // Mid-write: answer with the value being written, never a half-written one.
         memcpy(out, jobData_, kKeyBuf);
         source = Source::Eeprom;
+    } else if (phase_ != Phase::Idle && kind_ == JobKind::SlotErase && jobIndex_ == slot) {
+        defaultKey(slot, out);
     } else if (pendingSlot_ == slot) {
         memcpy(out, pendingKey_, kKeyBuf);
         source = Source::Eeprom;
@@ -253,6 +255,22 @@ MapStore::Result MapStore::beginSet(uint8_t slot, const char *key) {
     } else {
         startSlotJob(slot, key);
     }
+    return Result::Ok;
+}
+
+MapStore::Result MapStore::beginRevert(uint8_t slot) {
+    if (busy())
+        return Result::Busy;
+    if (slot >= kSlotCount)
+        return Result::BadSlot;
+    if (slotReserved(slot) != Reserved::No)
+        return Result::Reserved;
+    if (!formatted()) {
+        completion_ = Completion::Done;  // nothing in EEPROM: already the default
+        return Result::Ok;
+    }
+    completion_ = Completion::None;
+    startEraseJob(slot);
     return Result::Ok;
 }
 
@@ -318,6 +336,17 @@ void MapStore::startSlotJob(uint8_t slot, const char *key) {
     put16(jobData_ + kKeyBuf, slotCrc(slot, gen_, jobData_));
 
     kind_ = JobKind::Slot;
+    jobIndex_ = slot;
+    jobAddr_ = slotAddr(slot);
+    jobLen_ = kSlotSize;
+    jobPos_ = 0;
+    retries_ = 0;
+    phase_ = Phase::Write;
+}
+
+void MapStore::startEraseJob(uint8_t slot) {
+    memset(jobData_, 0xFF, kSlotSize);  // erased: fails the slot CRC, so it reads as the default
+    kind_ = JobKind::SlotErase;
     jobIndex_ = slot;
     jobAddr_ = slotAddr(slot);
     jobLen_ = kSlotSize;

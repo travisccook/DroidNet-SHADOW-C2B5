@@ -7,6 +7,7 @@
 #include "sm_line.h"
 #include "sm_protocol.h"
 #include "sm_resolve.h"
+#include "sm_runtime.h"
 #include "sm_slots.h"
 #include "sm_store.h"
 #include "sm_tx.h"

@@ -115,7 +115,6 @@ void printOutput();
 
 unsigned long previousDomeMillis = millis();
 unsigned long previousFootMillis = millis();
-unsigned long previousMarcDuinoMillis = millis();
 unsigned long previousDomeToggleMillis = millis();
 unsigned long previousSpeedToggleMillis = millis();
 unsigned long currentMillis = millis();
@@ -125,7 +124,6 @@ unsigned long lastConnectionAttemptTime = 0;
 unsigned long connectionTimeoutDuration = 30000;  // 30 second timeout for connections
 boolean connectionInProgress = false;
 
-int marcDuinoButtonCounter = 0;
 int speedToggleButtonCounter = 0;
 int domeToggleButtonCounter = 0;
 
@@ -211,7 +209,12 @@ class UsbReplyPort final : public sm::ReplyPort {
 };
 UsbReplyPort usbReplies;
 
-uint8_t deferredSlot = sm::kNoSlot;  // pressed while the EEPROM was mid-write; sent next pass
+#ifdef SHADOW_WDP_ANNOUNCE
+static_assert(sizeof(SHADOW_FW_VERSION) <= 12, "SHADOW_FW_VERSION too long for the WCB announce line");
+sm::Runtime mapRuntime(mapStore, mapProtocol, wcbTx, SHADOW_FW_VERSION);  // announces every 30 s
+#else
+sm::Runtime mapRuntime(mapStore, mapProtocol, wcbTx, nullptr);
+#endif
 
 // The buttons that matter for the mapping, as a bitmask.
 uint16_t heldButtons(PS3BT *pad) {
@@ -244,108 +247,30 @@ sm::PadState padState(PS3BT *pad) {
     return {connected, connected ? heldButtons(pad) : static_cast<uint16_t>(0)};
 }
 
-// Sends the stored command a slot maps to. Returns false, sending nothing, when the slot has
-// to be read from EEPROM while a write is in flight; the caller retries on the next pass.
-bool fireSlot(uint8_t slot) {
-    char key[sm::kKeyBuf];
-    sm::Source src = sm::Source::Default;
-    if (!mapStore.keyForSlot(slot, key, &src))
-        return false;
-
-    bool queued = false;
-    if (key[0] != '\0') {
-        queued = sm::pushCommand(wcbTx, mapStore.prefix(), key, mapStore.suffix());
-        wcbTx.drain(Serial1);
-    }
-    mapProtocol.notifyPress(slot, key, src);
+// Button combos to WCB stored commands (see sm::Runtime for the repeat timing).
+void mappedButtons() {
+    sm::FiredPress fired;
+    if (!mapRuntime.buttons(millis(), padState(PS3NavFoot), padState(PS3NavDome), &fired))
+        return;
+    wcbTx.drain(Serial1);  // send it now rather than at the end of the pass
 
 #ifdef SHADOW_VERBOSE
     char name[16];
-    sm::formatSlot(name, sizeof(name), slot);
+    sm::formatSlot(name, sizeof(name), fired.slot);
     output += "ACTIVATED: ";
     output += name;
     output += " -> ";
-    output += key[0] != '\0' ? key : "(unmapped)";
-    if (key[0] != '\0' && !queued)
+    output += fired.key[0] != '\0' ? fired.key : "(unmapped)";
+    if (fired.modFromOther)
+        output += " (modifier held on the other controller)";
+    if (fired.key[0] != '\0' && !fired.queued)
         output += " [WCB queue full, dropped]";
     output += "\r\n";
-#else
-    (void)queued;
 #endif
-    return true;
 }
-
-// Button mappings for one controller. Fires once when a combo is pressed, then once a second
-// while it's held; the counter is shared by both controllers, as it always has been.
-void mappedButtons(PS3BT *pad, PS3BT *otherPad, sm::Ctrl ctrl) {
-    if (!pad->PS3NavigationConnected)
-        return;
-    const sm::PadState self = padState(pad);
-    if (!sm::gateOpen(self.held))
-        return;
-
-    if ((millis() - previousMarcDuinoMillis) > 1000) {
-        marcDuinoButtonCounter = 0;
-        previousMarcDuinoMillis = millis();
-    }
-    marcDuinoButtonCounter += 1;
-    if (marcDuinoButtonCounter != 1)
-        return;
-
-    const uint8_t slot = sm::resolveSlot(ctrl, self, padState(otherPad));
-    if (slot != sm::kNoSlot && !fireSlot(slot))
-        deferredSlot = slot;
-}
-
-void retryDeferredPress() {
-    if (deferredSlot != sm::kNoSlot && fireSlot(deferredSlot))
-        deferredSlot = sm::kNoSlot;
-}
-
-// Reads "@SM" requests from one serial port without blocking. A request that can't be
-// answered yet (reply queue full, EEPROM busy) stays in the reader for the next pass.
-void pumpMapRequests(HardwareSerial &port, sm::LineReader &reader, sm::ReplyPort &replies) {
-    for (uint8_t i = 0; i < 64; ++i) {  // bounded work per pass
-        if (reader.ready()) {
-            if (!mapProtocol.handleLine(reader.line(), replies))
-                return;
-            reader.consume();
-        }
-        if (port.available() <= 0)
-            return;
-        reader.feed(static_cast<char>(port.read()));
-    }
-}
-
-#ifdef SHADOW_WDP_ANNOUNCE
-// Tells the WCB what's on this port every 30 seconds (WCB 6.2.1+ device announce), so its
-// mesh view, and DroidNet, can find SHADOW without anyone typing in the port.
-void announceToWcb() {
-    static_assert(sizeof(SHADOW_FW_VERSION) <= 12, "SHADOW_FW_VERSION too long for the announce line");
-    static unsigned long nextAnnounce = 5000;
-    if (static_cast<long>(millis() - nextAnnounce) < 0)
-        return;
-    char line[72];
-    strcpy_P(line, PSTR("@WDP1 {\"type\":\"Shadow\",\"fw\":\""));
-    strcat(line, SHADOW_FW_VERSION);
-    strcat_P(line, PSTR("\",\"caps\":[\"shadow.map\"]}"));
-    if (wcbTx.freeSpace() < strlen(line) + 1 + sm::kCommandHeadroom)
-        return;  // try again next pass
-    const char *parts[] = {line};
-    wcbTx.pushLine(parts, 1);
-    nextAnnounce = millis() + 30000UL;
-}
-#endif
 
 // Everything the mapping does between button presses. Runs every pass, faults included.
-void serviceMapping() {
-    mapProtocol.service();
-    mapStore.step();
-#ifdef SHADOW_WDP_ANNOUNCE
-    announceToWcb();
-#endif
-    wcbTx.drain(Serial1);
-}
+void serviceMapping() { mapRuntime.service(millis(), Serial1); }
 
 // =======================================================================================
 //                          Main Program
@@ -1425,8 +1350,8 @@ void loop() {
     // LOOP through functions from highest to lowest priority.
 
     // Mapping edits from DroidNet (via the WCB) or the USB port. Never blocks.
-    pumpMapRequests(Serial1, wcbLines, wcbReplies);
-    pumpMapRequests(Serial, usbLines, usbReplies);
+    mapRuntime.pump(Serial1, wcbLines, wcbReplies);
+    mapRuntime.pump(Serial, usbLines, usbReplies);
 
     if (!readUSB()) {
         // We have a fault condition that we want to ensure that we do NOT process any controller data!!!
@@ -1437,9 +1362,7 @@ void loop() {
 
     footMotorDrive();
     domeDrive();
-    retryDeferredPress();
-    mappedButtons(PS3NavDome, PS3NavFoot, sm::Ctrl::D);
-    mappedButtons(PS3NavFoot, PS3NavDome, sm::Ctrl::F);
+    mappedButtons();
     toggleSettings();
     serviceMapping();
     printOutput();

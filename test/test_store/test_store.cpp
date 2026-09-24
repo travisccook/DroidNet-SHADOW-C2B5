@@ -382,6 +382,61 @@ static void test_valid_eeprom_slot_count() {
     TEST_ASSERT_EQUAL_UINT8(2, store.validEepromSlots());
 }
 
+
+static void test_revert_erases_one_slot() {
+    MapStore store(*eeprom, kTestDefaults, kTestDefaultCount);
+    store.begin();
+    // Nothing stored yet: reverting is already done and writes nothing.
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MapStore::Result::Ok), static_cast<uint8_t>(store.beginRevert(kSlotFootL1Up)));
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MapStore::Completion::Done), static_cast<uint8_t>(store.takeCompletion()));
+    TEST_ASSERT_EQUAL_UINT32(0, eeprom->writes);
+
+    set(store, kSlotFootL1Up, "custom");
+    set(store, kSlotDomeL2Right, "other");
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MapStore::Result::Ok), static_cast<uint8_t>(store.beginRevert(kSlotFootL1Up)));
+    expectKey(store, kSlotFootL1Up, "extremehappysou", Source::Default);  // mid-erase reads the default
+    runUntilIdle(store);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MapStore::Completion::Done), static_cast<uint8_t>(store.takeCompletion()));
+    expectKey(store, kSlotFootL1Up, "extremehappysou", Source::Default);
+    expectKey(store, kSlotDomeL2Right, "other", Source::Eeprom);
+    MapStore rebooted(*eeprom, kTestDefaults, kTestDefaultCount);
+    rebooted.begin();
+    expectKey(rebooted, kSlotFootL1Up, "extremehappysou", Source::Default);
+    expectKey(rebooted, kSlotDomeL2Right, "other", Source::Eeprom);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MapStore::Result::Reserved),
+                            static_cast<uint8_t>(rebooted.beginRevert(slotIndex(Ctrl::F, Mod::L1, Btn::L3))));
+}
+
+static void test_power_cut_during_revert() {
+    {
+        MapStore store(*eeprom, kTestDefaults, kTestDefaultCount);
+        store.begin();
+        set(store, kSlotFootNoneDown, "custom");
+    }
+    snapshot();
+    for (uint32_t cut = 0; cut <= MapStore::kSlotSize; ++cut) {
+        restore();
+        eeprom->budget = static_cast<int32_t>(cut);
+        eeprom->cutGarbage = (cut % 3) == 1;
+        {
+            MapStore store(*eeprom, kTestDefaults, kTestDefaultCount);
+            store.begin();
+            store.beginRevert(kSlotFootNoneDown);
+            runUntilIdle(store);
+            store.takeCompletion();
+        }
+        eeprom->powerOn();
+        MapStore rebooted(*eeprom, kTestDefaults, kTestDefaultCount);
+        rebooted.begin();
+        char key[kKeyBuf];
+        Source src;
+        TEST_ASSERT_TRUE(rebooted.keyForSlot(kSlotFootNoneDown, key, &src));
+        const bool old = strcmp(key, "custom") == 0 && src == Source::Eeprom;
+        const bool reverted = strcmp(key, "angrysound") == 0 && src == Source::Default;
+        TEST_ASSERT_TRUE_MESSAGE(old || reverted, key);
+    }
+}
+
 int runAllTests() {
     UNITY_BEGIN();
     RUN_TEST(test_blank_eeprom_reads_defaults);
@@ -399,5 +454,7 @@ int runAllTests() {
     RUN_TEST(test_lost_header_does_not_resurrect_old_slots);
     RUN_TEST(test_newer_sequence_wins_across_wraparound);
     RUN_TEST(test_valid_eeprom_slot_count);
+    RUN_TEST(test_revert_erases_one_slot);
+    RUN_TEST(test_power_cut_during_revert);
     return UNITY_END();
 }

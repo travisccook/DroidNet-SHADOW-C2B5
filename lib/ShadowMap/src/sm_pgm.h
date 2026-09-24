@@ -26,6 +26,12 @@
 #ifndef strcmp_P
 #define strcmp_P strcmp
 #endif
+#ifndef strcpy_P
+#define strcpy_P strcpy
+#endif
+#ifndef strcat_P
+#define strcat_P strcat
+#endif
 #ifndef strlen_P
 #define strlen_P strlen
 #endif

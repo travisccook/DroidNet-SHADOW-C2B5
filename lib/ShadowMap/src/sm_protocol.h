@@ -68,15 +68,21 @@ class Protocol {
     // Finishes writes, sends their replies and paces DUMP. Call every loop pass.
     void service();
 
-    // A mapped combo was pressed. Sent to whichever port asked for EVENTS, if there's room.
-    void notifyPress(uint8_t slot, const char *key, Source src);
+    // A combo reached the mapping (mapped or not). Sent to whichever port asked for EVENTS,
+    // if there's room; `modFromOther` says the modifier was held on the other controller.
+    void notifyPress(uint8_t slot, const char *key, Source src, bool modFromOther);
+
+    // Controller connection state, for READY and (with EVENTS on) "@SM CTL" events.
+    void setPads(bool footConnected, bool domeConnected);
 
     bool opInProgress() const { return op_ != Op::None; }
 
   private:
-    enum class Op : uint8_t { None, Set, Defaults, Prefix, Suffix, Dump };
+    enum class Op : uint8_t { None, Set, Revert, Defaults, Prefix, Suffix, Dump, Sum };
 
     bool sendSlotLine(uint8_t slot, ReplyPort &port);
+    uint8_t formatSlotBody(char *dst, uint8_t cap, uint8_t slot, const char *key, Source src) const;
+    void servicePads();
     void sendOpReply(bool ok);
     void startOp(Op op, ReplyPort &port, MapStore::Result r, const char *verb, uint8_t slot);
 
@@ -89,9 +95,12 @@ class Protocol {
     char opArg_[2 * kPrefixMax + 1] = {};  // key or hex echo for the OK reply
     bool replyPending_ = false;
     bool opOk_ = false;
-    uint8_t dumpNext_ = 0;
+    uint8_t dumpNext_ = 0;  // next slot for DUMP / SUM
+    uint32_t sumCrc_ = 0;
 
     ReplyPort *eventPort_ = nullptr;
+    uint8_t pads_ = 0;          // bit 0 foot, bit 1 dome
+    uint8_t padsReported_ = 0;  // what the event port last heard
 };
 
 }  // namespace sm
