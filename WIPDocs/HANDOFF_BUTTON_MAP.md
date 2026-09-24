@@ -29,12 +29,17 @@ replaces the branch/PR advice in sections 2, 4 and 7.
 - CRCs on both legs
 - EEPROM persistence across a Mega reset
 - `@SM` over the Mega's USB port (step 11)
+- a full droid power cycle (step 10, 16:44Z). EEPROM (fmt=1, gen, slots, prefix) and WCB 1's NVS (S2 broadcast output
+  off, `alarm`/`sadsound`) all survived. But the **first `@SM` request after power-up got no reply**; the retry and
+  everything after answered normally. The likely cause (not proven): the listener opening ttyUSB0 about 35 s after
+  power-on resets WCB 1, the reset glitches S2's TX, and SHADOW's line reader is left holding an unterminated noise
+  byte, so it skips the next line. With broadcast output off, nothing else ends that line first. Clients already
+  resend on silence.
 
 **Still to do** (the controllers were away):
 
 - section 4 step 5 (driving), step 6 (real presses, including foot CIRCLE+LEFT `alarm` and foot RIGHT `sadsound`)
   and step 9 (editing while driving)
-- a full power cycle (step 10)
 
 State left on the droid: EEPROM formatted, all slots on their defaults (SUM `65096899`), EVENTS off.
 
