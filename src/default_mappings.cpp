@@ -37,7 +37,8 @@ const sm::DefaultMapping defaultButtonMappings[] PROGMEM = {
     // ---- FOOT controller ----
 
     // L1 + directional buttons - Emphasis Sounds
-    {FOOT(L1, UP), "extremehappysou"},     // Extreme Happy (15-character WCB key limit)
+    // (extremehappysou / extremeangrysou are cut to the WCB's 15-character key limit)
+    {FOOT(L1, UP), "extremehappysou"},     // Extreme Happy
     {FOOT(L1, LEFT), "scream"},            // Extreme Scared (Scream)
     {FOOT(L1, RIGHT), "extremesadsound"},  // Extreme Sad
     {FOOT(L1, DOWN), "extremeangrysou"},   // Extreme Angry

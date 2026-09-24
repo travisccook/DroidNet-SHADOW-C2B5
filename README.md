@@ -12,7 +12,7 @@ The primary control board for C2-B5, handling PS3 controller input, motor contro
 
 ## Features
 
-- **Table-driven button mapping**: Simple configuration of PS3 button combinations to droid functions
+- **Runtime-editable button mapping**: each PS3 button combination sends a WCB stored command; the built-in defaults are in `src/default_mappings.cpp`, and DroidNet can change any combination while the droid runs (kept in EEPROM, controllers stay connected)
 - **Dual PS3 controller support**: Separate controllers for foot and dome control
 - **Motor ramping**: Smooth acceleration/deceleration for safe driving
 - **Fault detection**: Automatic motor shutdown on controller disconnect or communication loss
@@ -20,20 +20,20 @@ The primary control board for C2-B5, handling PS3 controller input, motor contro
 
 ## Serial Interfaces
 
-- **Serial1 (9600 baud)**: Commands to the WCB (Wireless Communication Board), which routes them to the HCR Vocalizer, holoprojectors, and the other boards
+- **Serial1 (9600 baud)**: Commands to the WCB (Wireless Communication Board), which routes them to the HCR Vocalizer, holoprojectors, and the other boards; also carries DroidNet's button-mapping requests (`@SM` protocol)
 - **Serial2 (9600 baud)**: Motor controller communication (Sabertooth/SyRen)
 - **Serial3**: Unused (HCR Vocalizer commands now go through the WCB on Serial1)
 
 ## Configuration
 
-Button mappings and system settings are configured in `include/config.h` and `src/config.cpp`.
+System settings are configured in `include/config.h` and `src/config.cpp`. The built-in button mappings are in `src/default_mappings.cpp`; DroidNet can change them at runtime (see `WIPDocs/COMMAND_MAPPING_DESIGN.md`).
 
 ### Key Configuration Areas
 
 - **PS3 Controller MAC addresses**: Set in `include/controller_macs.h` (see Build Instructions)
 - **Drive speeds**: Normal and overspeed settings
-- **Button mappings**: Table-driven approach for easy customization
-- **Audio/visual settings**: Volume and brightness controls
+- **Button mappings**: built-in defaults in `src/default_mappings.cpp`; runtime changes from DroidNet are stored in EEPROM
+- **Volume and brightness**: now WCB stored commands like any other mapping (SHADOW keeps no state for them)
 
 ## Safety Features
 
@@ -54,10 +54,15 @@ cp include/controller_macs.example.h include/controller_macs.h
 
 ```bash
 pio run                                  # Build firmware
-pio run -t upload                        # Upload to Mega ADK
+pio run -t upload                        # Upload to Mega ADK (keeps the EEPROM mapping)
 pio device monitor --baud 115200         # Serial monitor
 pio check                                # clang-tidy lint
+pio test -e native                       # Unit tests on the host
+pio test -e simavr --without-uploading   # Unit tests on an emulated ATmega2560
+python3 -m unittest tools/shadowmap/test_shadowmap.py   # Pi-side client contract tests
 ```
+
+For bench testing, the mapping protocol also works on the USB port, e.g. type `@SM DUMP` in the serial monitor, or use `tools/shadowmap/shadowmap.py --usb /dev/ttyACM0 dump`. Opening the USB port resets the Mega; DroidNet uses the WCB link instead.
 
 Each build also copies the firmware to `build/SHADOWC2B5_<timestamp>.hex` and updates `build/SHADOWC2B5_latest.hex` (see `scripts/post_build.py`).
 

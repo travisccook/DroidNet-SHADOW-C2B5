@@ -125,8 +125,9 @@ void pass(Shadow &s, FileEeprom &eeprom, StdoutUart &uart, InputQueue &in, sm::P
     now += kPassMs;
 }
 
-bool busy(Shadow &s, InputQueue &in) {
-    return !in.empty() || s.reader.ready() || s.store.busy() || s.protocol.opInProgress() || s.tx.used() > 0;
+bool busy(Shadow &s, InputQueue &in, const StdoutUart &uart) {
+    return !in.empty() || s.reader.ready() || s.store.busy() || s.protocol.opInProgress() || s.tx.used() > 0 ||
+           uart.room < 63;  // still clocking bytes out of the UART
 }
 
 }  // namespace
@@ -176,7 +177,7 @@ int main(int argc, char **argv) {
             in.bytes.push_back('\r');  // the WCB ends every line it writes to an S-port with \r
         }
 
-        for (int i = 0; i < 20000 && busy(*shadow, in); ++i)
+        for (int i = 0; i < 20000 && busy(*shadow, in, uart); ++i)
             pass(*shadow, eeprom, uart, in, foot, dome);
         printf("!!IDLE %u\n", static_cast<unsigned>(now));
         fflush(stdout);

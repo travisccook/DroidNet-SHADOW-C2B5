@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 """
-Update Control Mapping Excel File from C2B5 config.cpp
-This script updates the ControlMapping.xlsx file with current button mappings from config.cpp
-It also adds new rows for mappings not present in the Excel template
+Update Control Mapping Excel File from the C2B5 built-in button mappings
+This script updates the ControlMapping.xlsx file with the built-in mappings in
+src/default_mappings.cpp: the WCB stored-command key goes where the function code used to,
+and the entry's trailing comment is the description. Rows for mappable combos that no longer
+have a built-in mapping are blanked. It also adds new rows for mappings not present in the
+Excel template.
+
+The built-in mappings are only the defaults: DroidNet can change any combo at runtime.
 
 Usage:
-    python3 update_control_mapping.py <excel_file> <config_cpp_file>
-    
+    python3 update_control_mapping.py <excel_file> <default_mappings_cpp>
+
 Example:
-    python3 update_control_mapping.py ../../Reference/ControlMapping.xlsx ../../src/config.cpp
+    python3 update_control_mapping.py ../../Reference/ControlMapping.xlsx ../../src/default_mappings.cpp
 """
 
 import sys
@@ -26,52 +31,49 @@ except ImportError:
     sys.exit(1)
 
 
+MODIFIER_LABELS = {'NONE': None, 'L1': 'L1', 'L2': 'L2', 'PS': 'PS', 'CIRCLE': 'O', 'CROSS': 'X'}
+BUTTONS = ('UP', 'RIGHT', 'DOWN', 'LEFT', 'L3', 'PS')
+
+
+def combo_name(modifier, button):
+    """The spreadsheet's name for a combo: 'UP', 'L1 + UP', 'O + UP' (CIRCLE), 'X + UP' (CROSS)."""
+    label = MODIFIER_LABELS[modifier]
+    return button if label is None else f"{label} + {button}"
+
+
+def mappable_combos(controller):
+    """Every combo SHADOW can map (reserved ones excluded, see default_mappings.cpp)."""
+    combos = set()
+    for modifier in MODIFIER_LABELS:
+        for button in BUTTONS:
+            if button == 'PS' and modifier not in ('L1', 'L2'):
+                continue  # PS is only a button with L1/L2 held
+            if controller == 'FOOT' and modifier == 'L1' and button == 'L3':
+                continue  # over-speed toggle
+            combos.add(combo_name(modifier, button))
+    return combos
+
+
 def parse_config_cpp(filepath):
-    """Parse the config.cpp file and extract button mappings"""
+    """Parse src/default_mappings.cpp and extract the built-in button mappings.
+
+    Entries look like:  {FOOT(L1, UP), "extremehappysou"},  // Extreme Happy
+    Returns (foot, dome) dicts of combo name -> (key, description).
+    """
     foot_mappings = {}
     dome_mappings = {}
-    
+
     with open(filepath, 'r') as f:
         content = f.read()
-    
-    # Parse foot button mappings
-    foot_match = re.search(r'const SimpleButtonMapping footButtonMappings\[\] = \{(.*?)\};', 
-                          content, re.DOTALL)
-    if foot_match:
-        foot_section = foot_match.group(1)
-        mapping_pattern = r'\{\s*(\w+),\s*(\w+),\s*(\d+),\s*"([^"]+)"\s*\}'
-        for match in re.finditer(mapping_pattern, foot_section):
-            button, modifier, code, desc = match.groups()
-            # Create the combo key
-            if modifier == 'NO_MODIFIER':
-                combo = button
-            elif modifier == 'CIRCLE':
-                combo = f"O + {button}"
-            elif modifier == 'CROSS':
-                combo = f"X + {button}"
-            else:
-                combo = f"{modifier} + {button}"
-            foot_mappings[combo] = (int(code), desc)
-    
-    # Parse dome button mappings  
-    dome_match = re.search(r'const SimpleButtonMapping domeButtonMappings\[\] = \{(.*?)\};', 
-                          content, re.DOTALL)
-    if dome_match:
-        dome_section = dome_match.group(1)
-        mapping_pattern = r'\{\s*(\w+),\s*(\w+),\s*(\d+),\s*"([^"]+)"\s*\}'
-        for match in re.finditer(mapping_pattern, dome_section):
-            button, modifier, code, desc = match.groups()
-            # Create the combo key
-            if modifier == 'NO_MODIFIER':
-                combo = button
-            elif modifier == 'CIRCLE':
-                combo = f"O + {button}"
-            elif modifier == 'CROSS':
-                combo = f"X + {button}"
-            else:
-                combo = f"{modifier} + {button}"
-            dome_mappings[combo] = (int(code), desc)
-    
+
+    pattern = re.compile(r'\{\s*(FOOT|DOME)\(\s*(\w+)\s*,\s*(\w+)\s*\)\s*,\s*"([^"]*)"\s*\}\s*,?[ \t]*(?://[ \t]*(.*))?')
+    for match in pattern.finditer(content):
+        controller, modifier, button, key, desc = match.groups()
+        if modifier not in MODIFIER_LABELS or button not in BUTTONS:
+            raise ValueError(f"Unknown combo {controller}({modifier}, {button}) in {filepath}")
+        target = foot_mappings if controller == 'FOOT' else dome_mappings
+        target[combo_name(modifier, button)] = (key, (desc or key).strip())
+
     return foot_mappings, dome_mappings
 
 
@@ -99,6 +101,7 @@ def update_excel(excel_path, foot_mappings, dome_mappings):
         existing_dome_combos = set()
         existing_foot_combos = set()
         updates_made = 0
+        cleared = 0
         
         for row in range(4, ws.max_row + 1):
             # Check dome controller
@@ -112,6 +115,10 @@ def update_excel(excel_path, foot_mappings, dome_mappings):
                     ws[f'B{row}'] = code
                     ws[f'C{row}'] = desc
                     updates_made += 1
+                elif combo_key in mappable_combos('DOME'):
+                    ws[f'B{row}'] = ""
+                    ws[f'C{row}'] = ""  # no built-in mapping any more
+                    cleared += 1
             
             # Check foot controller
             foot_combo = ws[f'E{row}'].value
@@ -124,11 +131,15 @@ def update_excel(excel_path, foot_mappings, dome_mappings):
                     ws[f'F{row}'] = code
                     ws[f'G{row}'] = desc
                     updates_made += 1
+                elif combo_key in mappable_combos('FOOT'):
+                    ws[f'F{row}'] = ""
+                    ws[f'G{row}'] = ""  # no built-in mapping any more
+                    cleared += 1
         
         # Combine all existing combos
         existing_combos = existing_dome_combos | existing_foot_combos
         
-        print(f"Updated {updates_made} existing mappings")
+        print(f"Updated {updates_made} existing mappings, blanked {cleared} with no built-in mapping")
         
         # Find missing mappings
         all_combos = set(foot_mappings.keys()) | set(dome_mappings.keys())
@@ -242,10 +253,10 @@ def main():
         sys.exit(1)
     
     if not config_path.exists():
-        print(f"Error: Config file not found: {config_path}")
+        print(f"Error: mappings file not found: {config_path}")
         sys.exit(1)
     
-    print(f"Reading config from: {config_path}")
+    print(f"Reading built-in mappings from: {config_path}")
     foot_mappings, dome_mappings = parse_config_cpp(config_path)
     
     print(f"\nFound {len(foot_mappings)} foot mappings")
