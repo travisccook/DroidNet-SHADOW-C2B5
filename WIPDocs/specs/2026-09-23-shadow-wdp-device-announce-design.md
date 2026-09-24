@@ -91,15 +91,19 @@ public:
 
 It prints one build flag, `'-DGIT_REV="<rev>"'`, the form given in the PlatformIO dynamic build flags docs.
 
-- `<rev>` comes from `git describe --always --dirty --abbrev=7`, run in the project directory. Examples: `a51a459`,
-  or `a51a459-dirty`.
+- `<rev>` is `git rev-parse --short=7 HEAD`, plus `-dirty` when `git status --porcelain --untracked-files=no`
+  prints anything. It is run in the project directory. Examples: `a51a459`, or `a51a459-dirty`. This is used
+  instead of `git describe` so that a future tag cannot turn it into `v1.0-3-g…`.
 - If git fails, `<rev>` is `unknown`.
 - `<rev>` is lower-cased, filtered to `[0-9a-z-]`, and truncated to 14 characters.
 
 ### `platformio.ini`
 
-- `[env:SHADOWC2B5]` `build_flags` gains `!python scripts/git_rev.py`.
+- `[env:SHADOWC2B5]` `build_flags` gains `!python3 scripts/git_rev.py`. Tested: this Mac has no `python` on PATH,
+  and `$PYTHONEXE` is not expanded inside a `!` flag.
+- `[env:SHADOWC2B5]` gains `test_ignore = *`, so `pio test` never builds or uploads a test image to the Mega.
 - A new `[env:native]` is added with `platform = platformio/native` and `test_framework = unity`.
+- `check_src_filters` gains `+<lib/WdpAnnounce/>`.
 - `default_envs` stays `SHADOWC2B5`, so `pio run` builds only the firmware.
 
 ### `src/main.cpp`
