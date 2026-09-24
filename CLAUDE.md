@@ -22,7 +22,7 @@ pio run -t upload --upload-port /dev/ttyACM0
 pio device monitor --baud 115200         # Serial monitor
 pio run -t clean                         # Clean
 pio check                                # clang-tidy
-pio test -e native                       # Host unit tests (lib/WdpAnnounce)
+pio test -e native                       # Host tests: lib/WdpAnnounce + Serial1 button-mashing simulation
 ```
 
 The firmware environment is `SHADOWC2B5`, the default. Each build also copies the firmware to `build/` via
