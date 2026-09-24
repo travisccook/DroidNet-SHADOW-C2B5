@@ -1,10 +1,10 @@
 # Runtime Button Mapping
 
-**Status:** implemented, and merged to `main` in [PR #1](https://github.com/travisccook/SHADOW-C2B5/pull/1). It is
+**Status:** implemented, and merged to `main` in [PR #1](https://github.com/travisccook/DroidNet-SHADOW-C2B5/pull/1). It is
 tested on the host, on an emulated ATmega2560 (simavr), and against the reference Pi client.
 **It runs on the droid** (`e3f6b82`, flashed 2026-09-24). Verified there: the WCB link in both directions, every
 verb, and EEPROM persistence across a reset. Not yet tested: real button presses, driving, and a power cycle
-([results on PR #1](https://github.com/travisccook/SHADOW-C2B5/pull/1#issuecomment-5817847387)). The DroidNet
+([results on PR #1](https://github.com/travisccook/DroidNet-SHADOW-C2B5/pull/1#issuecomment-5817847387)). The DroidNet
 side is being built. Its design and UI live in the
 DroidNetSignalBooster repo: [backend design](https://github.com/travisccook/DroidNetSignalBooster/blob/main/docs/superpowers/specs/2026-09-24-shadow-button-map-design.md) and
 [UI design and mockup](https://github.com/travisccook/DroidNetSignalBooster/blob/main/docs/superpowers/specs/2026-09-24-shadow-button-map-ui-design.md). Work in progress is tracked in

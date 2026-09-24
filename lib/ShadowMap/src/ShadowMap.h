@@ -1,4 +1,4 @@
-// Runtime-editable button mapping for SHADOW-C2B5. See WIPDocs/COMMAND_MAPPING_DESIGN.md.
+// Runtime-editable button mapping for DroidNet-SHADOW-C2B5. See WIPDocs/COMMAND_MAPPING_DESIGN.md.
 #pragma once
 
 #include "sm_pgm.h"

@@ -1,4 +1,6 @@
-# SHADOW-C2B5 - Main Controller Board
+# DroidNet-SHADOW-C2B5 - Main Controller Board
+
+> **DroidNet's port of SHADOW.** This is the SHADOW firmware that DroidNet Signal Booster's SHADOW tab talks to. The runtime button map (the `@SM` protocol, edited live from DroidNet) exists only in this port: other SHADOW variants, including KnightShade's original SHADOW and SHADOW+MD, can't be remapped from DroidNet.
 
 The primary control board for C2-B5, handling PS3 controller input, motor control, and inter-board communication.
 

@@ -9,10 +9,15 @@ Claims below are marked **VERIFIED** (with how) or **ASSUMED**. Re-check anythin
 
 ---
 
+> **Update 2026-09-24 (later):** the repo is now **DroidNet-SHADOW-C2B5** (renamed from SHADOW-C2B5; GitHub
+> redirects the old URLs, and local checkouts may keep their folder names). The owner commits straight to `main`:
+> there are no PRs, so ignore the "comment on the PRs" advice below. DroidNet's side is on DroidNetSignalBooster
+> `main`; its handoff lists the controller checks still to do.
+
 ## 0. Status at the end of 2026-09-24 (the second SHADOW-C2B5 session)
 
 Section 4 is partly done. Results are on
-[PR #1](https://github.com/travisccook/SHADOW-C2B5/pull/1#issuecomment-5817847387).
+[PR #1](https://github.com/travisccook/DroidNet-SHADOW-C2B5/pull/1#issuecomment-5817847387).
 
 **The droid runs `af4db5d`** (flashed 2026-09-24 about 17:05Z). That's PR #1, plus #2 (the build flag is now
 `!python3`, because macOS has no `python`), #3 (a boot-log line break), and the line-reader fix for the lost first
@@ -144,7 +149,7 @@ Read, in this order:
 
 ## 2. State of the world
 
-**It's on `main`.** [PR #1](https://github.com/travisccook/SHADOW-C2B5/pull/1) was merged on 2026-09-24 at the
+**It's on `main`.** [PR #1](https://github.com/travisccook/DroidNet-SHADOW-C2B5/pull/1) was merged on 2026-09-24 at the
 owner's request, **before any hardware test**. So `main` holds firmware that has never run on the droid, and it
 controls motors: nobody drives on it until the section 4 checks pass. What the droid runs today is unknown; the dump
 in section 4 captures it. Make any fix on a new branch (in a worktree) with its own PR, because `main` is what gets

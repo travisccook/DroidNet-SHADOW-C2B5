@@ -1,7 +1,7 @@
 {
   "name": "ShadowMap",
   "version": "1.0.0",
-  "description": "Runtime-editable button mapping for SHADOW-C2B5: slot layout, EEPROM store and the @SM line protocol. Hardware-independent so it builds and tests on the host.",
+  "description": "Runtime-editable button mapping for DroidNet-SHADOW-C2B5: slot layout, EEPROM store and the @SM line protocol. Hardware-independent so it builds and tests on the host.",
   "frameworks": "*",
   "platforms": "*"
 }
