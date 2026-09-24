@@ -36,7 +36,8 @@ replaces the branch/PR advice in sections 2, 4 and 7.
   everything after answered normally. The likely cause (not proven): the listener opening ttyUSB0 about 35 s after
   power-on resets WCB 1, the reset glitches S2's TX, and SHADOW's line reader is left holding an unterminated noise
   byte, so it skips the next line. With broadcast output off, nothing else ends that line first. Fixed in `af4db5d`:
-  leading noise bytes are now ignored. Not yet re-checked with another power cycle.
+  leading noise bytes are now ignored. Confirmed on the droid: after DroidNet 2.3.6's deploy reset WCB 1
+  (listener reopened at 17:16:54Z), the first `;S2@SM HELLO` was answered on the first attempt, in 98 ms.
 
 **Still to do** (the controllers were away):
 
