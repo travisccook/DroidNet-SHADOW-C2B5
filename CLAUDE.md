@@ -51,7 +51,7 @@ The script updates existing rows, adds rows for new combinations, backs up the s
 ### Serial Interfaces
 
 - **Serial**: 115200 debug output
-- **Serial1 (9600)**: commands to the WCB (Wireless Communication Board), which routes them to the HCR Vocalizer, holoprojectors, and other boards. Every 25-30 s it also carries a WDP Device Announce, `@WDP1 {"type":"Shadow","fw":"<GIT_REV>"}\r` (`lib/WdpAnnounce`, `wdpAnnounceTick()`), sent only when the TX buffer can take the whole line. WCB 1 labels the port "Shadow" in the mesh; `?WDP,DA` on WCB 1 shows `fw`.
+- **Serial1 (9600)**: commands to the WCB (Wireless Communication Board), which routes them to the HCR Vocalizer, holoprojectors, and other boards. Every 25-30 s it also carries a WDP Device Announce, `@WDP1 {"type":"Shadow","fw":"<GIT_REV>"}\r` (`lib/WdpAnnounce`, `wdpAnnounceTick()`), sent only when the TX buffer can take the whole line. WCB 1 labels the port "Shadow" in the mesh; `?WDP,DA` on WCB 1 shows `fw`. SHADOW is wired to **WCB 1 port S2** (identified by its first announce, 2026-09-24).
 - **Serial2 (9600)**: Sabertooth (feet) and SyRen (dome) packetized serial
 - **Serial3**: unused
 
