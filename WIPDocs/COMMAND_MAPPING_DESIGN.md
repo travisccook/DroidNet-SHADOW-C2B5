@@ -238,6 +238,25 @@ These follow the owner's announce decisions in
 [HANDOFF_2026-09-23_shadow_wdp_device_announce.md](HANDOFF_2026-09-23_shadow_wdp_device_announce.md),
 with one change the owner made on 2026-09-24: SHADOW now also *reads* Serial1, for `@SM`.
 
+## DroidNet's export (the mapping on paper)
+
+DroidNet's SHADOW tab (DroidNetSignalBooster `c6902014`, DroidNet 2.3.6) exports and imports the whole mapping as JSON.
+That replaces the old control-mapping spreadsheet, which is retired. DroidNet owns this format; its handoff
+(`docs/superpowers/HANDOFF_2026-09-24_shadow_button_map.md`) is the reference. Version 1 looks like this:
+
+```json
+{ "format": "droidnet-shadow-map", "version": 1, "exported": "<ISO time>", "booster": "c2-body",
+  "shadow": { "fw": "af4db5d", "gen": 1 }, "prefix": ";W1;C", "suffix": "",
+  "slots": { "F": { "L1": { "UP": { "key": "extremehappysou", "src": "default" },
+                          "PS": { "key": null, "src": "default" } } }, "D": { } },
+  "labels": { "extremehappysou": "HCR Extreme Happy" } }
+```
+
+- Slots use the same `<C> <M> <B>` names as the protocol. Each is `{key: string|null, src: "default"|"eeprom"}`, so a
+  custom value that happens to equal the default stays distinct.
+- Reserved slots are left out.
+- `labels` are DroidNet's descriptions of the WCB stored commands, kept on the Pi. SHADOW never sees them.
+
 ## Firmware structure
 
 | File | What |
