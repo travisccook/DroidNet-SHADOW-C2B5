@@ -44,7 +44,12 @@ replaces the branch/PR advice in sections 2, 4 and 7.
 - section 4 step 5 (driving), step 6 (real presses, including foot CIRCLE+LEFT `alarm` and foot RIGHT `sadsound`)
   and step 9 (editing while driving)
 
-State left on the droid: EEPROM formatted, all slots on their defaults (SUM `65096899`), EVENTS off.
+State left on the droid: EEPROM formatted, gen 1, all slots on their defaults (SUM `65096899`), EVENTS off.
+
+**DroidNet 2.3.6** (the SHADOW tab, on c2-body since 17:16Z) ran the full edit lifecycle against the droid:
+SET, a custom clear, REVERT, the reserved and bad-key refusals, a 2-slot apply, and DEFAULTS (gen 0 → 1). Every
+result matched the spec, with no retries and no ERR replies. Still to test, with the controllers: live PRESS/CTL
+events and finding a combo by pressing it.
 
 **WCB 1 S2 has broadcast output off** (`?BCAST,OUT,S2,OFF`, the owner's OK). Mesh broadcasts no longer reach
 SHADOW; routed `;S2...` lines still do. It's in WCB 1's NVS, and the hourly backups capture it.
