@@ -43,7 +43,7 @@ The script updates existing rows, adds rows for new combinations, backs up the s
 ## Architecture
 
 - `src/main.cpp`: controller setup, fault detection, drive/dome motor control; reads the controllers into `sm::PadState` and hands button mapping to `sm::Runtime`
-- `src/config.cpp` / `include/config.h`: speeds, baud rates, `SHADOW_FW_VERSION`, `SHADOW_WDP_ANNOUNCE`
+- `src/config.cpp` / `include/config.h`: speeds, baud rates, `SHADOW_WDP_ANNOUNCE`. `SHADOW_FW_VERSION` is set by the build to the git commit (`scripts/git_rev.py`)
 - `src/default_mappings.cpp`: the built-in button mappings (combo → WCB stored-command key) and the list of hardcoded combos
 - `lib/ShadowMap/`: the runtime-editable button mapping (no Arduino dependency, so it builds and tests on the host): slot layout and lookup rule, EEPROM store, the `@SM` protocol DroidNet uses to edit mappings over the WCB link, the Serial1 TX queue, and `sm::Runtime` (what `loop()` does for the mapping). Design and protocol reference: `WIPDocs/COMMAND_MAPPING_DESIGN.md`
 - `tools/shadowmap/`: reference Pi-side client (`shadowmap.py`, also a CLI), a host build of SHADOW's mapping side (`shadow_sim.cpp`), and their contract tests
@@ -54,7 +54,7 @@ The script updates existing rows, adds rows for new combinations, backs up the s
 ### Serial Interfaces
 
 - **Serial**: 115200 debug output; also accepts `@SM` mapping requests for bench testing (opening it resets the Mega)
-- **Serial1 (9600)**: commands to the WCB (Wireless Communication Board), which routes them to the HCR Vocalizer, holoprojectors, and other boards. SHADOW also reads `@SM` mapping requests from DroidNet here and replies with `;S0@SM ...` lines, and announces itself every 30 s (`@WDP1 {...}`). Everything SHADOW sends on Serial1 after `setup()` goes through `sm::TxQueue`; never `Serial1.print` directly in `loop()`, or a command can land inside a reply line
+- **Serial1 (9600)**: commands to the WCB (Wireless Communication Board), which routes them to the HCR Vocalizer, holoprojectors, and other boards. SHADOW also reads `@SM` mapping requests from DroidNet here and replies with `;S0@SM ...` lines, and announces itself every 25-30 s (`@WDP1 {...}`, `fw` = the git commit from `scripts/git_rev.py`; none while a controller fault is active). Everything SHADOW sends on Serial1 after `setup()` goes through `sm::TxQueue`; never `Serial1.print` directly in `loop()`, or a command can land inside a reply line
 - **Serial2 (9600)**: Sabertooth (feet) and SyRen (dome) packetized serial
 - **Serial3**: unused
 

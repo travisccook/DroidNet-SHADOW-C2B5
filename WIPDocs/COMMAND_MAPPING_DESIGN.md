@@ -1,7 +1,7 @@
 # Runtime Button Mapping
 
-**Status:** implemented in firmware 2.0.0 on `claude/arduino-command-mapping-config-x49d73`. It is
-tested on the host, on an emulated ATmega2560 (simavr), and against the reference Pi client.
+**Status:** implemented on `claude/arduino-command-mapping-config-x49d73`. It is tested on the host,
+on an emulated ATmega2560 (simavr), and against the reference Pi client.
 **It has not run on the droid yet.** The DroidNet side is designed but not built. Its design and UI live in the
 DroidNetSignalBooster repo: [backend design](https://github.com/travisccook/DroidNetSignalBooster/blob/main/docs/superpowers/specs/2026-09-24-shadow-button-map-design.md) and
 [UI design and mockup](https://github.com/travisccook/DroidNetSignalBooster/blob/main/docs/superpowers/specs/2026-09-24-shadow-button-map-ui-design.md). Work in progress is tracked in
@@ -209,16 +209,30 @@ The format is `ERR <code> [<VERB> [<slot>]]`.
 
 ### Discovery
 
-With `SHADOW_WDP_ANNOUNCE` defined (the default), SHADOW sends this to its WCB every 30 s, the
-first time 5 s after boot:
+With `SHADOW_WDP_ANNOUNCE` defined (the default), SHADOW sends this to its WCB 0.5-3 s after boot,
+then every 25-30 s, each interval drawn at random:
 
 ```
-@WDP1 {"type":"Shadow","fw":"2.0.0","caps":["shadow.map"]}
+@WDP1 {"type":"Shadow","fw":"<commit>"}
 ```
 
-This is WCB 6.2.1+ device announce. The WCB prints `[WDP-DA] S3: Shadow fw 2.0.0` on USB when it
-first hears it, and `?WDP,DA` lists it. That's how DroidNet finds SHADOW's S-port. Comment the
-define out for WCB firmware older than 6.2.1, which would broadcast the line instead.
+This is the WCB 6.2.1+ device announce (WDP-DA). The WCB prints `[WDP-DA] S<x>: Shadow fw <commit>`
+on USB when it first hears it (and again after a 90 s silence), and `?WDP,DA` lists it. That's how
+DroidNet finds SHADOW's S-port. Only the type leaves that WCB: the mesh shows the port as
+`S<x> Shadow`, while `fw` is visible only on SHADOW's own WCB. Comment the define out for WCB
+firmware older than 6.2.1, which would broadcast the line instead.
+
+- **`fw` is the git commit** the firmware was built from, with `+` when tracked files had
+  uncommitted changes (`scripts/git_rev.py`, run from `platformio.ini`). HELLO's READY reports the
+  same value.
+- **No announce during a controller fault** (the `readUSB()` early return). A due announce waits
+  for the fault to clear. Replies to `@SM` requests still go out.
+- **It goes through the TX queue** like everything else, so it never blocks and never lands inside a
+  command or a reply. A `static_assert` in `main.cpp` keeps the line within the 64-byte UART buffer.
+
+These follow the owner's announce decisions in
+[HANDOFF_2026-09-23_shadow_wdp_device_announce.md](HANDOFF_2026-09-23_shadow_wdp_device_announce.md),
+with one change the owner made on 2026-09-24: SHADOW now also *reads* Serial1, for `@SM`.
 
 ## Firmware structure
 

@@ -145,6 +145,15 @@ static void test_per_pass_work_is_bounded() {
     TEST_ASSERT_TRUE(pushCommand(tx, store.prefix(), key, store.suffix()));
     tx.drain(wcb);
     report("button press", micros() - t);
+
+    // A pass that sends the WCB device announce (builds the line, draws the next interval).
+    static Runtime runtime(store, protocol, tx, "abcdef0123+");
+    runtime.startAnnounce(0, 42);
+    const uint32_t before = wcb.bytes;
+    t = micros();
+    runtime.service(Runtime::kFirstAnnounceMaxMs, wcb);
+    report("pass with the announce", micros() - t);
+    TEST_ASSERT_TRUE(wcb.bytes > before);
 }
 
 #else

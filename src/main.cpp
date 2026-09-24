@@ -212,9 +212,12 @@ class UsbReplyPort final : public sm::ReplyPort {
 };
 UsbReplyPort usbReplies;
 
+// SHADOW_FW_VERSION goes in @SM READY and in the announce; ?WDP,DA on the WCB shows 14 characters.
+static_assert(sizeof(SHADOW_FW_VERSION) <= 12, "SHADOW_FW_VERSION is longer than 11 characters");
 #ifdef SHADOW_WDP_ANNOUNCE
-static_assert(sizeof(SHADOW_FW_VERSION) <= 12, "SHADOW_FW_VERSION too long for the WCB announce line");
-sm::Runtime mapRuntime(mapStore, mapProtocol, wcbTx, SHADOW_FW_VERSION);  // announces every 30 s
+// The announce line has to fit the 64-byte Serial1 TX buffer in one go.
+static_assert(sm::Runtime::kAnnounceOverhead + sizeof(SHADOW_FW_VERSION) - 1 <= 63, "WCB announce line too long");
+sm::Runtime mapRuntime(mapStore, mapProtocol, wcbTx, SHADOW_FW_VERSION);  // announces every 25-30 s
 #else
 sm::Runtime mapRuntime(mapStore, mapProtocol, wcbTx, nullptr);
 #endif
@@ -271,8 +274,9 @@ void mappedButtons() {
 #endif
 }
 
-// Everything the mapping does between button presses. Runs every pass, faults included.
-void serviceMapping() { mapRuntime.service(millis(), Serial1); }
+// Everything the mapping does between button presses. Runs every pass, faults included, but
+// SHADOW doesn't announce itself to the WCB while a controller fault is active.
+void serviceMapping(bool faulted) { mapRuntime.service(millis(), Serial1, !faulted); }
 
 // =======================================================================================
 //                          Main Program
@@ -338,7 +342,13 @@ void setup() {
     output += ", prefix ";
     output += mapStore.prefix();
     output += "\r\n";
+    output += "Firmware ";
+    output += SHADOW_FW_VERSION;
+    output += "\r\n";
 #endif
+
+    // First WCB device announce in 0.5-3 s (if SHADOW_WDP_ANNOUNCE is on).
+    mapRuntime.startAnnounce(millis(), static_cast<uint32_t>(random()));
 }
 
 // =======================================================================================
@@ -1357,7 +1367,7 @@ void loop() {
 
     if (!readUSB()) {
         // We have a fault condition that we want to ensure that we do NOT process any controller data!!!
-        serviceMapping();
+        serviceMapping(true);
         printOutput();
         return;
     }
@@ -1366,7 +1376,7 @@ void loop() {
     domeDrive();
     mappedButtons();
     toggleSettings();
-    serviceMapping();
+    serviceMapping(false);
     printOutput();
 
     // If dome automation is enabled - Call function

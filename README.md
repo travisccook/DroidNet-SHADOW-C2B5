@@ -73,13 +73,13 @@ Each build also copies the firmware to `build/SHADOWC2B5_<timestamp>.hex` and up
 
 ## Button Mapping
 
-See `src/config.cpp` for complete button mapping tables. The system uses a table-driven approach where each button combination maps to a specific function code that triggers actions across the droid's systems.
+Each button combination sends a WCB stored command. The built-in defaults are in `src/default_mappings.cpp`; DroidNet changes them at runtime over the WCB link, and the changes are kept in EEPROM (see `WIPDocs/COMMAND_MAPPING_DESIGN.md`).
 
-The printable mapping lives in `Reference/ControlMapping.xlsx` (and `.pdf`). After changing the tables in `src/config.cpp`, update the spreadsheet with:
+The printable mapping lives in `Reference/ControlMapping.xlsx` (and `.pdf`). After changing `src/default_mappings.cpp`, update the spreadsheet with:
 
 ```bash
 cd WIPDocs/scripts
-python3 update_control_mapping.py ../../Reference/ControlMapping.xlsx ../../src/config.cpp
+python3 update_control_mapping.py ../../Reference/ControlMapping.xlsx ../../src/default_mappings.cpp
 ```
 
 Requires openpyxl (`pip3 install openpyxl`). The script backs up the spreadsheet before changing it.

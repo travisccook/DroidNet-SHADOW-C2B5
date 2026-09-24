@@ -99,11 +99,14 @@ struct InputQueue {
     bool empty() const { return pos >= bytes.size(); }
 };
 
+uint32_t now = 0;
+
 struct Shadow {
     explicit Shadow(FileEeprom &eeprom)
-        : store(eeprom, defaultButtonMappings, defaultButtonMappingsCount), port(tx), protocol(store, "2.0.0-sim"),
-          runtime(store, protocol, tx, "2.0.0-sim") {
+        : store(eeprom, defaultButtonMappings, defaultButtonMappingsCount), port(tx), protocol(store, "sim"),
+          runtime(store, protocol, tx, "sim") {
         store.begin();
+        runtime.startAnnounce(now, 1);  // as at the end of main.cpp's setup()
     }
     sm::MapStore store;
     sm::TxQueue tx;
@@ -112,8 +115,6 @@ struct Shadow {
     sm::Runtime runtime;
     sm::LineReader reader;
 };
-
-uint32_t now = 0;
 
 void pass(Shadow &s, FileEeprom &eeprom, StdoutUart &uart, InputQueue &in, sm::PadState foot, sm::PadState dome) {
     s.runtime.pump(in, s.reader, s.port);

@@ -19,12 +19,16 @@
 //#define SHADOW_DEBUG   // uncomment this for console DEBUG output
 #define SHADOW_VERBOSE // uncomment this for console VERBOSE output
 
-// Firmware version, reported to DroidNet (@SM HELLO) and in the WCB device announce.
-#define SHADOW_FW_VERSION "2.0.0"
+// Firmware version, reported to DroidNet (@SM HELLO) and in the WCB device announce. The
+// firmware build sets it to the git commit (scripts/git_rev.py, "+" if the tree had
+// uncommitted changes); "dev" is only for builds that don't run that script.
+#ifndef SHADOW_FW_VERSION
+#define SHADOW_FW_VERSION "dev"
+#endif
 
-// Announce SHADOW to its WCB every 30 s ("@WDP1 {...}", WCB 6.2.1 and later), so the WCB mesh
-// and DroidNet can see which port SHADOW is on. Comment out for WCB firmware older than 6.2.1,
-// which would broadcast the announce line to every board instead of recognising it.
+// Announce SHADOW to its WCB every 25-30 s ("@WDP1 {...}", WCB 6.2.1 and later), so the WCB
+// mesh and DroidNet can see which port SHADOW is on. Comment out for WCB firmware older than
+// 6.2.1, which would broadcast the announce line to every board instead of recognising it.
 #define SHADOW_WDP_ANNOUNCE
 
 // ---------------------------------------------------------------------------------------

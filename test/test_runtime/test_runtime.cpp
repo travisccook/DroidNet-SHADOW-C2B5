@@ -260,35 +260,92 @@ static void test_pump_work_per_pass_is_bounded() {
     TEST_ASSERT_EQUAL_UINT32(Runtime::kMaxBytesPerPass, rig->in.pos);
 }
 
+// Runs passes every `step` ms from `from` until an announce goes out; returns its time.
+static uint32_t nextAnnounceAt(uint32_t from, uint32_t step) {
+    const uint32_t count = rig->wcb.announces.count;
+    uint32_t t = from;
+    for (; t < from + 40000 && rig->wcb.announces.count == count; t += step)
+        pass(t, held(0));
+    TEST_ASSERT_EQUAL_UINT32(count + 1, rig->wcb.announces.count);
+    return t - step;
+}
+
 static void test_announce_timing_and_format() {
-    for (uint32_t t = 0; t < 5000; t += 50)
+    for (uint32_t t = 0; t < 60000; t += 500)
         pass(t, held(0));
-    TEST_ASSERT_EQUAL_UINT32(0, rig->wcb.announces.count);
-    pass(5000, held(0));
-    TEST_ASSERT_EQUAL_UINT32(1, rig->wcb.announces.count);
-    TEST_ASSERT_EQUAL_STRING("@WDP1 {\"type\":\"Shadow\",\"fw\":\"2.0.0\",\"caps\":[\"shadow.map\"]}", rig->wcb.announces.last());
-    for (uint32_t t = 5050; t < 35000; t += 500)
-        pass(t, held(0));
-    TEST_ASSERT_EQUAL_UINT32(1, rig->wcb.announces.count);
-    pass(35000, held(0));
-    TEST_ASSERT_EQUAL_UINT32(2, rig->wcb.announces.count);
+    TEST_ASSERT_EQUAL_UINT32(0, rig->wcb.announces.count);  // not until startAnnounce()
+
+    rig->runtime.startAnnounce(60000, 12345);
+    const uint32_t first = nextAnnounceAt(60000, 10);
+    TEST_ASSERT_UINT32_WITHIN(1250, 60000 + 1750, first);  // 0.5-3 s after the start
+    TEST_ASSERT_EQUAL_STRING("@WDP1 {\"type\":\"Shadow\",\"fw\":\"2.0.0\"}", rig->wcb.announces.last());
+    TEST_ASSERT_EQUAL_UINT32(Runtime::kAnnounceOverhead, strlen(rig->wcb.announces.last()) + 1 - strlen("2.0.0"));
+
+    uint32_t at = first;
+    uint32_t lo = 0xFFFFFFFFUL, hi = 0;
+    for (int i = 0; i < 8; ++i) {
+        const uint32_t next = nextAnnounceAt(at + 50, 50);
+        const uint32_t gap = next - at;
+        lo = gap < lo ? gap : lo;
+        hi = gap > hi ? gap : hi;
+        at = next;
+    }
+    TEST_ASSERT_UINT32_WITHIN(2550, 27500, lo);  // every gap 25-30 s (to the 50 ms step)
+    TEST_ASSERT_UINT32_WITHIN(2550, 27500, hi);
+    TEST_ASSERT_TRUE(hi - lo >= 500);  // and they vary
+}
+
+static void test_announce_start_depends_on_seed() {
+    Runtime a(rig->store, rig->protocol, rig->tx, "2.0.0");
+    Runtime b(rig->store, rig->protocol, rig->tx, "2.0.0");
+    Runtime zero(rig->store, rig->protocol, rig->tx, "2.0.0");
+    a.startAnnounce(0, 1);
+    b.startAnnounce(0, 2);
+    zero.startAnnounce(0, 0);  // a zero seed must still work
+    Runtime *runtimes[] = {&a, &b, &zero};
+    uint32_t first[] = {0, 0, 0};
+    for (uint32_t t = 0; t <= 3000; t += 10) {
+        for (int i = 0; i < 3; ++i) {
+            rig->wcb.refill();
+            const uint32_t before = rig->wcb.announces.count;
+            runtimes[i]->service(t, rig->wcb);
+            if (rig->wcb.announces.count != before && first[i] == 0)
+                first[i] = t;
+        }
+    }
+    const uint32_t firstA = first[0], firstB = first[1], firstZero = first[2];
+    TEST_ASSERT_TRUE(firstA >= 500 && firstB >= 500 && firstZero >= 500);
+    TEST_ASSERT_TRUE(firstA != firstB);
 }
 
 static void test_announce_waits_for_room_and_can_be_off() {
+    rig->runtime.startAnnounce(0, 99);
     const char *filler[] = {";filler filler filler filler filler filler filler filler filler filler"};
     rig->wcb.room = 0;
     while (rig->tx.pushLine(filler, 1)) {
     }
-    rig->runtime.service(6000, rig->wcb);  // due, but no room: skipped, not squeezed in
+    rig->runtime.service(3000, rig->wcb);  // due, but no room: skipped, not squeezed in
     TEST_ASSERT_EQUAL_UINT32(0, rig->wcb.announces.count);
     rig->wcb.refill();
-    for (uint32_t t = 6001; t < 6100 && rig->wcb.announces.count == 0; ++t)
+    for (uint32_t t = 3001; t < 3100 && rig->wcb.announces.count == 0; ++t)
         pass(t, held(0));
     TEST_ASSERT_EQUAL_UINT32(1, rig->wcb.announces.count);
 
     Runtime quiet(rig->store, rig->protocol, rig->tx, nullptr);
+    quiet.startAnnounce(0, 99);
     for (uint32_t t = 0; t < 100000; t += 1000)
         quiet.service(t, rig->wcb);
+    TEST_ASSERT_EQUAL_UINT32(1, rig->wcb.announces.count);
+}
+
+static void test_no_announce_during_a_fault() {
+    rig->runtime.startAnnounce(0, 5);
+    for (uint32_t t = 0; t < 120000; t += 100) {
+        rig->runtime.service(t, rig->wcb, false);  // readUSB() reported a fault
+        rig->wcb.refill();
+    }
+    TEST_ASSERT_EQUAL_UINT32(0, rig->wcb.announces.count);
+    pass(120000, held(0));  // fault cleared: the overdue announce goes straight out
     TEST_ASSERT_EQUAL_UINT32(1, rig->wcb.announces.count);
 }
 
@@ -336,7 +393,9 @@ int runAllTests() {
     RUN_TEST(test_pump_reads_requests_through_noise);
     RUN_TEST(test_pump_work_per_pass_is_bounded);
     RUN_TEST(test_announce_timing_and_format);
+    RUN_TEST(test_announce_start_depends_on_seed);
     RUN_TEST(test_announce_waits_for_room_and_can_be_off);
+    RUN_TEST(test_no_announce_during_a_fault);
     RUN_TEST(test_millis_wraparound);
     RUN_TEST(test_events_follow_presses_and_controllers);
     return UNITY_END();

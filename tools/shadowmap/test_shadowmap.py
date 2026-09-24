@@ -177,7 +177,7 @@ class ContractTest(unittest.TestCase):
         self.assertEqual(1, self.ready.version)
         self.assertEqual(72, self.ready.slots)
         self.assertFalse(self.ready.formatted)
-        self.assertEqual("2.0.0-sim", self.ready.fw)
+        self.assertEqual("sim", self.ready.fw)
 
     def test_dump_shows_the_built_in_map(self):
         states = {s.slot: s for s in self.client.dump()}
@@ -296,8 +296,8 @@ class ContractTest(unittest.TestCase):
         self.assertEqual(";W1;CGDcollar", self.wcb.commands[-1])
 
     def test_announce(self):
-        self.wcb.tick(6000)
-        self.assertEqual(['@WDP1 {"type":"Shadow","fw":"2.0.0-sim","caps":["shadow.map"]}'], self.wcb.announces)
+        self.wcb.tick(6000)  # the first 0.5-3 s after boot, the next 25-30 s after that
+        self.assertEqual(['@WDP1 {"type":"Shadow","fw":"sim"}'], self.wcb.announces)
 
 
 class RemoteRouteTest(unittest.TestCase):

@@ -25,15 +25,25 @@ struct FiredPress {
 class Runtime {
   public:
     static constexpr uint32_t kRepeatMs = 1000;
-    static constexpr uint32_t kFirstAnnounceMs = 5000;
-    static constexpr uint32_t kAnnounceEveryMs = 30000;
+    // The WCB device announce: the first 0.5-3 s after startAnnounce(), then every 25-30 s,
+    // each interval drawn afresh so boards that booted together don't stay in step.
+    static constexpr uint32_t kFirstAnnounceMinMs = 500;
+    static constexpr uint32_t kFirstAnnounceMaxMs = 3000;
+    static constexpr uint32_t kAnnounceMinMs = 25000;
+    static constexpr uint32_t kAnnounceMaxMs = 30000;
+    // Announce line length (with its \r) minus the firmware version's length:
+    // @WDP1 {"type":"Shadow","fw":"<fw>"}\r
+    static constexpr uint8_t kAnnounceOverhead = 32;
     static constexpr uint8_t kMaxBytesPerPass = 64;
     static constexpr uint32_t kDeferMaxMs = 250;  // a deferred press older than this is dropped
 
-    // `announceFw` enables the WCB device announce ("@WDP1 {...}") with that firmware
-    // version; nullptr turns it off.
+    // `announceFw` is the firmware version for the WCB device announce ("@WDP1 {...}");
+    // nullptr turns the announce off. It starts with startAnnounce().
     Runtime(MapStore &store, Protocol &protocol, TxQueue &tx, const char *announceFw)
         : store_(store), protocol_(protocol), tx_(tx), announceFw_(announceFw) {}
+
+    // Call once at the end of setup(). `seed` varies the announce intervals (any value).
+    void startAnnounce(uint32_t nowMs, uint32_t seed);
 
     // Once per pass, after the controllers have been read: the dome controller, then the foot,
     // as the old code did. A combo fires when pressed and again every second while held; the
@@ -65,12 +75,14 @@ class Runtime {
     }
 
     // Every pass, faults included: finishes protocol work, advances EEPROM writes, sends the
-    // announce when due, and hands queued bytes to the WCB's UART.
+    // announce when due, and hands queued bytes to the WCB's UART. Pass `mayAnnounce` false
+    // while a controller fault is active: a due announce then waits for the fault to clear.
     template <class Serial>
-    void service(uint32_t nowMs, Serial &wcb) {
+    void service(uint32_t nowMs, Serial &wcb, bool mayAnnounce = true) {
         protocol_.service();
         store_.step();
-        announce(nowMs);
+        if (mayAnnounce)
+            announce(nowMs);
         tx_.drain(wcb);
     }
 
@@ -78,6 +90,7 @@ class Runtime {
     bool handlePad(Ctrl ctrl, const PadState &self, const PadState &other, uint32_t nowMs, FiredPress *fired);
     bool fire(uint8_t slot, bool modFromOther, FiredPress *fired);
     void announce(uint32_t nowMs);
+    uint32_t between(uint32_t lo, uint32_t hi);  // pseudo-random, lo..hi inclusive
 
     MapStore &store_;
     Protocol &protocol_;
@@ -89,7 +102,9 @@ class Runtime {
     uint8_t deferredSlot_ = kNoSlot;  // pressed while the EEPROM was mid-write
     bool deferredFromOther_ = false;
     uint32_t deferredAt_ = 0;
-    uint32_t nextAnnounce_ = kFirstAnnounceMs;
+    bool announcing_ = false;
+    uint32_t nextAnnounce_ = 0;
+    uint32_t rng_ = 1;
 };
 
 }  // namespace sm

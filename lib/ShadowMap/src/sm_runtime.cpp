@@ -70,26 +70,41 @@ bool Runtime::fire(uint8_t slot, bool modFromOther, FiredPress *fired) {
     return true;
 }
 
+void Runtime::startAnnounce(uint32_t nowMs, uint32_t seed) {
+    rng_ = seed != 0 ? seed : 0x2545F491UL;  // xorshift can't start from 0
+    nextAnnounce_ = nowMs + between(kFirstAnnounceMinMs, kFirstAnnounceMaxMs);
+    announcing_ = announceFw_ != nullptr;
+}
+
+uint32_t Runtime::between(uint32_t lo, uint32_t hi) {
+    // xorshift32: plenty for spreading announces out, and cheap on AVR.
+    rng_ ^= rng_ << 13;
+    rng_ ^= rng_ >> 17;
+    rng_ ^= rng_ << 5;
+    return lo + rng_ % (hi - lo + 1);
+}
+
 void Runtime::announce(uint32_t nowMs) {
-    if (announceFw_ == nullptr || static_cast<int32_t>(nowMs - nextAnnounce_) < 0)
+    if (!announcing_ || static_cast<int32_t>(nowMs - nextAnnounce_) < 0)
         return;
-    // @WDP1 {"type":"Shadow","fw":"<fw>","caps":["shadow.map"]}
-    char line[80];
+    // @WDP1 {"type":"Shadow","fw":"<fw>"}
+    char line[64];
     strcpy_P(line, PSTR("@WDP1 {\"type\":\"Shadow\",\"fw\":\""));
     const size_t used = strlen(line);
-    const size_t tailLen = strlen_P(PSTR("\",\"caps\":[\"shadow.map\"]}"));
     const size_t fwLen = strlen(announceFw_);
-    if (used + fwLen + tailLen >= sizeof(line)) {
-        announceFw_ = nullptr;  // can't happen with a sane version string; stop trying
+    if (used + fwLen + 2 >= sizeof(line)) {
+        announcing_ = false;  // main.cpp's static_assert rules this out; stop rather than truncate
         return;
     }
-    memcpy(line + used, announceFw_, fwLen + 1);
-    strcat_P(line, PSTR("\",\"caps\":[\"shadow.map\"]}"));
+    memcpy(line + used, announceFw_, fwLen);
+    line[used + fwLen] = '"';
+    line[used + fwLen + 1] = '}';
+    line[used + fwLen + 2] = '\0';
     if (tx_.freeSpace() < strlen(line) + 1 + kCommandHeadroom)
         return;  // busy right now; try again next pass
     const char *parts[] = {line};
     tx_.pushLine(parts, 1);
-    nextAnnounce_ = nowMs + kAnnounceEveryMs;
+    nextAnnounce_ = nowMs + between(kAnnounceMinMs, kAnnounceMaxMs);
 }
 
 }  // namespace sm
