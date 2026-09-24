@@ -332,7 +332,7 @@ void setup() {
     // Button mapping: reads the EEPROM headers once; everything after this is non-blocking.
     mapStore.begin();
 #ifdef SHADOW_VERBOSE
-    output += "Button mapping: ";
+    output += "\r\nButton mapping: ";
     if (mapStore.formatted()) {
         output += mapStore.validEepromSlots();
         output += " slot(s) from EEPROM, the rest built-in";
