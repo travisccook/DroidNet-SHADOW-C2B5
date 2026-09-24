@@ -1,7 +1,7 @@
 # Runtime Button Mapping
 
-**Status:** implemented on `claude/arduino-command-mapping-config-x49d73`. It is tested on the host,
-on an emulated ATmega2560 (simavr), and against the reference Pi client.
+**Status:** implemented, and merged to `main` in [PR #1](https://github.com/travisccook/SHADOW-C2B5/pull/1). It is
+tested on the host, on an emulated ATmega2560 (simavr), and against the reference Pi client.
 **It has not run on the droid yet.** The DroidNet side is designed but not built. Its design and UI live in the
 DroidNetSignalBooster repo: [backend design](https://github.com/travisccook/DroidNetSignalBooster/blob/main/docs/superpowers/specs/2026-09-24-shadow-button-map-design.md) and
 [UI design and mockup](https://github.com/travisccook/DroidNetSignalBooster/blob/main/docs/superpowers/specs/2026-09-24-shadow-button-map-ui-design.md). Work in progress is tracked in

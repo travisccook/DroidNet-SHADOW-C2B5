@@ -28,10 +28,11 @@ Read, in this order:
 
 ## 2. State of the world
 
-**Branch:** `claude/arduino-command-mapping-config-x49d73`. The PR against `main`
-([#1](https://github.com/travisccook/SHADOW-C2B5/pull/1)) is open and **not merged**. The firmware hasn't run on the
-droid, and it controls motors, so it merges only after the hardware checks in section 4 pass and the user says so.
-`main` is at `a51a459` (the 2026-09-23 announce handoff), and the branch has `main` merged in. VERIFIED (`git log`).
+**It's on `main`.** [PR #1](https://github.com/travisccook/SHADOW-C2B5/pull/1) was merged on 2026-09-24 at the
+owner's request, **before any hardware test**. So `main` holds firmware that has never run on the droid, and it
+controls motors: nobody drives on it until the section 4 checks pass. What the droid runs today is unknown; the dump
+in section 4 captures it. Make any fix on a new branch (in a worktree) with its own PR, because `main` is what gets
+flashed.
 
 **What changed:**
 
@@ -108,8 +109,7 @@ The rest of that handoff still stands and is yours to use:
 - the owner's open questions (port label, level shifting, power feed)
 - recording SHADOW's WCB port in `CLAUDE.md` once the announce reveals it
 
-Treat it as done by this branch; don't implement the announce a second time. When the PR merges, add a note at its
-top saying so.
+Treat it as done by PR #1; don't implement the announce a second time. A note at its top says so.
 
 ## 4. Your first job: help the user validate on the droid
 
@@ -173,8 +173,8 @@ record the results on the PR, and fix anything that breaks.
     and every other slot is intact.
 
 Tell the DroidNet session when steps 7-9 pass, along with the S-port and any timings you saw: that's when it can test
-against the real droid. Then ask the user whether to merge the PR. If anything goes wrong, roll back with the dump
-(the 2026-09-23 handoff, "Rollback").
+against the real droid. If anything goes wrong, roll back with the dump (the 2026-09-23 handoff, "Rollback"), then fix
+it on a branch and PR.
 
 ## 5. After that
 
@@ -231,8 +231,9 @@ endpoints, and the SHADOW tab. Its docs are on DroidNetSignalBooster `main`
 1. **Directly.** Both sessions run on the user's machine. Use `ListAgents` to find the other local session (it's
    working in DroidNetSignalBooster) and `SendMessage` to reach it. Introduce yourself when you start, with your
    branch and head commit. If your build doesn't have these tools, use 2.
-2. **In writing.** Comment on the other repo's PR: this one is SHADOW-C2B5 #1, and the DroidNet session will open
-   its own implementation PR and post the link on #1. This is the durable record for decisions and protocol changes.
+2. **In writing.** Comment on the PRs: SHADOW-C2B5 #1 (merged, but still this feature's thread), your fix PRs, and
+   the DroidNet session's implementation PR, whose link it will post on #1. This is the durable record for decisions
+   and protocol changes.
 3. **Through the user,** for decisions that are theirs (merging, hardware, flashing, product questions).
 
 **Contract rules:**
@@ -257,12 +258,11 @@ endpoints, and the SHADOW tab. Its docs are on DroidNetSignalBooster `main`
 
 ## 8. Open questions for the user
 
-1. Merge the firmware PR after the section 4 checks?
-2. Is the WCB 1 → SHADOW wire (to the Mega's RX1, pin 19) connected? If not, it has to be added for edits over the
+1. Is the WCB 1 → SHADOW wire (to the Mega's RX1, pin 19) connected? If not, it has to be added for edits over the
    WCB.
-3. From the 2026-09-23 handoff, still open:
+2. From the 2026-09-23 handoff, still open:
    - label SHADOW's WCB port (`?LABEL,S<x>,Shadow`)?
    - a divider on SHADOW's TX to the WCB?
    - is SHADOW fed on VIN or 5 V? That decides the USB power blocker.
-4. Add a learn mode for shows?
-5. Should the new volume and brightness commands become built-in defaults, or stay DroidNet-only?
+3. Add a learn mode for shows?
+4. Should the new volume and brightness commands become built-in defaults, or stay DroidNet-only?
