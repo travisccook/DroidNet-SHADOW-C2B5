@@ -8,3 +8,6 @@ build/
 .claude/settings.local.json
 # Local PS3 controller MAC addresses (see include/controller_macs.example.h)
 include/controller_macs.h
+
+# Python bytecode (tools/)
+__pycache__/

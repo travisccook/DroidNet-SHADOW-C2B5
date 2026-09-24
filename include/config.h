@@ -2,7 +2,6 @@
 #define CONFIG_H
 
 #include <Arduino.h>
-#include <PS3BT.h>  // Required for ButtonEnum type
 
 // =======================================================================================
 //                          SHADOW+MD+C2B5 Configuration File
@@ -19,6 +18,18 @@
 
 //#define SHADOW_DEBUG   // uncomment this for console DEBUG output
 #define SHADOW_VERBOSE // uncomment this for console VERBOSE output
+
+// Firmware version, reported to DroidNet (@SM HELLO) and in the WCB device announce. The
+// firmware build sets it to the git commit (scripts/git_rev.py, "+" if the tree had
+// uncommitted changes); "dev" is only for builds that don't run that script.
+#ifndef SHADOW_FW_VERSION
+#define SHADOW_FW_VERSION "dev"
+#endif
+
+// Announce SHADOW to its WCB every 25-30 s ("@WDP1 {...}", WCB 6.2.1 and later), so the WCB
+// mesh and DroidNet can see which port SHADOW is on. Comment out for WCB firmware older than
+// 6.2.1, which would broadcast the announce line to every board instead of recognising it.
+#define SHADOW_WDP_ANNOUNCE
 
 // ---------------------------------------------------------------------------------------
 //                          PS3 Controller MAC Addresses
@@ -56,20 +67,11 @@ extern byte joystickDomeDeadZoneRange; // Dome controller deadzone
 extern byte driveDeadBandRange;        // Sabertooth motor deadband
 
 // ---------------------------------------------------------------------------------------
-//                          Audio/Visual Settings
-// ---------------------------------------------------------------------------------------
-
-extern int brightnessInterval;         // Brightness change per 'click'
-extern int brightness;                 // Starting brightness level
-extern int volumeInterval;            // Volume change per 'click'
-extern int volume;                     // Starting volume level
-
-// ---------------------------------------------------------------------------------------
 //                          Communication Settings
 // ---------------------------------------------------------------------------------------
 
 extern int motorControllerBaudRate;    // Sabertooth/SyRen baud rate
-extern int marcDuinoBaudRate;          // MarcDuino board baud rate
+extern int marcDuinoBaudRate;          // WCB (Serial1) baud rate
 extern unsigned int SerialLatency;     // Serial communication delay (ms)
 
 // ---------------------------------------------------------------------------------------
@@ -82,77 +84,12 @@ extern unsigned int SerialLatency;     // Serial communication delay (ms)
 
 
 // ---------------------------------------------------------------------------------------
-//                          MarcDuino Function Code Documentation
+//                          Button Mapping
 // ---------------------------------------------------------------------------------------
 //
-// Standard MarcDuino Function Codes:
-//     2 = Scream - all panels open
-//     7 = Faint / Short Circuit
-//     9 = Leia message
-//    10 = Disco
-//    26 = Volume Up
-//    27 = Volume Down
-//    28 = Volume Max
-//    29 = Volume Mid
-//    76 = Magic Panel ON
-//    77 = Magic Panel OFF
-//    78 = Magic Panel Flicker (10 seconds)
+// The built-in button mappings are in src/default_mappings.cpp. DroidNet can change them at
+// runtime; see WIPDocs/COMMAND_MAPPING_DESIGN.md.
 //
-// Custom C2-B5 Function Codes:
-//    79 = Reset - Silent
-//    80 = Reset - Chatty
-//    81 = Yes
-//    82 = No
-//    83 = Imperial March
-//    84 = Random Happy Sound
-//    85 = Random Holo Twitch
-//    86 = TEMP Open Body Servos (REMOVED)
-//    87 = TEMP Close Body Servos (REMOVED)
-//    88 = Front Holo Up
-//    89 = Front Holo Left
-//    90 = Front Holo Right
-//    91 = Front Holo Down
-//    92 = Front Holo Center
-//    93 = Random Scared Sound
-//    94 = Random Sad Sound
-//    95 = Raspberry
-//    96 = In Love
-//    97 = Jedi Theme
-//    98 = Brightness Down
-//    99 = Brightness Mid
-//    100 = Brightness Up
-//    101 = Brightness Max
-//    102 = Toggle Body Door (REMOVED)
-//    103 = Toggle Utility Arms (REMOVED)
-//    104 = Scanning
-//    105 = Alarm
-//    106 = Random Angry Sound
-//    107 = Cantina
-//    108 = Extreme Sad Sound
-//
-// ---------------------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------------------
-//                          Button Mapping System
-// ---------------------------------------------------------------------------------------
-
-// Button mapping structure using PS3 library's ButtonEnum directly
-struct SimpleButtonMapping {
-    ButtonEnum primary;
-    ButtonEnum modifier; // Use NO_MODIFIER for buttons without modifiers
-    int functionCode;    // MarcDuino function code
-    const char* description;  // Human-readable description of the function
-};
-
-// Special constant for "no modifier" - using an unused ButtonEnum value
-constexpr ButtonEnum NO_MODIFIER = static_cast<ButtonEnum>(255);
-
-// External declarations for button mapping arrays (defined in config.cpp)
-extern const SimpleButtonMapping footButtonMappings[];
-extern const SimpleButtonMapping domeButtonMappings[];
-extern const size_t footButtonMappingsCount;
-extern const size_t domeButtonMappingsCount;
-
 // ---------------------------------------------------------------------------------------
 
 #endif // CONFIG_H 

@@ -89,6 +89,8 @@
 #include <usbhub.h>
 #include "../lib/Sabertooth/Sabertooth.h"
 #include "../include/config.h"
+#include "../include/default_mappings.h"
+#include <ShadowMap.h>
 
 // ---------------------------------------------------------------------------------------
 //                        General User Settings
@@ -106,7 +108,6 @@ String getLastConnectedBtMAC();
 boolean criticalFaultDetect();
 boolean readUSB();
 void printOutput();
-void marcDuinoButtonPush(int type, int MD_func);
 
 // ---------------------------------------------------------------------------------------
 //                          Variables
@@ -114,7 +115,6 @@ void marcDuinoButtonPush(int type, int MD_func);
 
 unsigned long previousDomeMillis = millis();
 unsigned long previousFootMillis = millis();
-unsigned long previousMarcDuinoMillis = millis();
 unsigned long previousDomeToggleMillis = millis();
 unsigned long previousSpeedToggleMillis = millis();
 unsigned long currentMillis = millis();
@@ -124,7 +124,6 @@ unsigned long lastConnectionAttemptTime = 0;
 unsigned long connectionTimeoutDuration = 30000;  // 30 second timeout for connections
 boolean connectionInProgress = false;
 
-int marcDuinoButtonCounter = 0;
 int speedToggleButtonCounter = 0;
 int domeToggleButtonCounter = 0;
 
@@ -178,224 +177,106 @@ unsigned long DriveMillis = 0;
 
 int footDriveSpeed = 0;
 
-String toSerial = "2P";  // String for manipulation before sending to Serial
-
 // ---------------------------------------------------------------------------------------
-//                          Button Mapping Functions
+//                          Button Mapping
 // ---------------------------------------------------------------------------------------
+//
+// Each controller button combo has a slot that names a WCB stored command. The built-in
+// defaults are in src/default_mappings.cpp; DroidNet can change any slot at runtime over the
+// WCB link (the "@SM" protocol, see lib/ShadowMap and WIPDocs/COMMAND_MAPPING_DESIGN.md) and
+// the change is kept in EEPROM. None of it blocks: EEPROM writes happen one byte per pass in
+// the background and everything bound for the WCB goes through one non-blocking queue.
 
-// Helper function to convert ButtonEnum to human-readable string
-String getButtonName(ButtonEnum button) {
-    switch (button) {
-        case UP:
-            return "UP";
-        case RIGHT:
-            return "RIGHT";
-        case DOWN:
-            return "DOWN";
-        case LEFT:
-            return "LEFT";
-        case SELECT:
-            return "SELECT";
-        case START:
-            return "START";
-        case L3:
-            return "L3";
-        case R3:
-            return "R3";
-        case L2:
-            return "L2";
-        case R2:
-            return "R2";
-        case L1:
-            return "L1";
-        case R1:
-            return "R1";
-        case TRIANGLE:
-            return "TRIANGLE";
-        case CIRCLE:
-            return "CIRCLE";
-        case CROSS:
-            return "CROSS";
-        case SQUARE:
-            return "SQUARE";
-        case PS:
-            return "PS";
-        case NO_MODIFIER:
-            return "NONE";
-        default:
-            return "UNKNOWN(" + String((int) button) + ")";
+sm::AvrEeprom mapEeprom;
+sm::MapStore mapStore(mapEeprom, defaultButtonMappings, defaultButtonMappingsCount);
+sm::TxQueue wcbTx;  // everything SHADOW sends the WCB on Serial1 after setup()
+sm::WcbPort wcbReplies(wcbTx);
+sm::Protocol mapProtocol(mapStore, SHADOW_FW_VERSION);
+sm::LineReader wcbLines;
+sm::LineReader usbLines;
+
+// Replies to "@SM" requests typed on the USB port go out with the debug output. A reply waits
+// until `output` is nearly empty, so printOutput()'s write stays short (the UART buffer holds
+// 64 bytes; 128 bytes at 115200 is under 6 ms).
+class UsbReplyPort final : public sm::ReplyPort {
+  public:
+    static constexpr unsigned kBudget = 128;
+    bool canSend(uint8_t len) override { return output.length() + len + 4 <= kBudget; }
+    void send(const char *line, uint8_t len) override {
+        (void)len;
+        output += "\r\n";  // start a fresh line even if debug text didn't end one
+        output += line;
+        output += "\r\n";
     }
-}
+    bool requiresCrc() const override { return false; }
+};
+UsbReplyPort usbReplies;
 
-// Helper function to get controller name
-String getControllerName(PS3BT *controller) {
-    if (controller == PS3NavFoot) {
-        return "FOOT";
-    } else if (controller == PS3NavDome) {
-        return "DOME";
-    } else {
-        return "UNKNOWN";
-    }
-}
-
-
-// Helper function to check if a button combination is pressed
-// Supports cross-controller combinations for CROSS and CIRCLE buttons only
-bool isSimpleButtonComboPressed(PS3BT *primaryController, ButtonEnum primary, ButtonEnum modifier) {
-    if (modifier == NO_MODIFIER) {
-        return primaryController->getButtonPress(primary);
-    } else {
-        bool primaryPressed = primaryController->getButtonPress(primary);
-        bool modifierPressed = false;
-        PS3BT *modifierController = primaryController;  // Default to same controller
-
-        // CROSS, CIRCLE, and PS can come from the other controller
-        if (modifier == CROSS || modifier == CIRCLE || modifier == PS) {
-            // For foot controller, check dome controller first if connected
-            if (primaryController == PS3NavFoot && PS3NavDome->PS3NavigationConnected) {
-                modifierPressed = PS3NavDome->getButtonPress(modifier);
-                if (modifierPressed) {
-                    modifierController = PS3NavDome;
-                } else {
-                    // Fall back to foot controller
-                    modifierPressed = PS3NavFoot->getButtonPress(modifier);
-                    modifierController = PS3NavFoot;
-                }
-            }
-            // For dome controller, check foot controller first if connected
-            else if (primaryController == PS3NavDome && PS3NavFoot->PS3NavigationConnected) {
-                modifierPressed = PS3NavFoot->getButtonPress(modifier);
-                if (modifierPressed) {
-                    modifierController = PS3NavFoot;
-                } else {
-                    // Fall back to dome controller
-                    modifierPressed = PS3NavDome->getButtonPress(modifier);
-                    modifierController = PS3NavDome;
-                }
-            } else {
-                // No cross-controller available, check same controller
-                modifierPressed = primaryController->getButtonPress(modifier);
-            }
-        } else {
-            // L1, L2 only come from the primary controller (L3 is not used as a modifier)
-            modifierPressed = primaryController->getButtonPress(modifier);
-        }
-
-#ifdef SHADOW_VERBOSE
-        if (primaryPressed || modifierPressed) {
-            output += "[";
-            output += getControllerName(primaryController);
-            output += "] ";
-            output += getButtonName(primary);
-            output += " (";
-            output += primaryPressed ? "ON" : "OFF";
-            output += ")";
-            if (modifier != NO_MODIFIER) {
-                output += " + ";
-                if (modifierController != primaryController) {
-                    output += "[";
-                    output += getControllerName(modifierController);
-                    output += "] ";
-                }
-                output += getButtonName(modifier);
-                output += " (";
-                output += modifierPressed ? "ON" : "OFF";
-                output += ")";
-            }
-            output += "\r\n";
-        }
+// SHADOW_FW_VERSION goes in @SM READY and in the announce; ?WDP,DA on the WCB shows 14 characters.
+static_assert(sizeof(SHADOW_FW_VERSION) <= 12, "SHADOW_FW_VERSION is longer than 11 characters");
+#ifdef SHADOW_WDP_ANNOUNCE
+// The announce line has to fit the 64-byte Serial1 TX buffer in one go.
+static_assert(sm::Runtime::kAnnounceOverhead + sizeof(SHADOW_FW_VERSION) - 1 <= 63, "WCB announce line too long");
+sm::Runtime mapRuntime(mapStore, mapProtocol, wcbTx, SHADOW_FW_VERSION);  // announces every 25-30 s
+#else
+sm::Runtime mapRuntime(mapStore, mapProtocol, wcbTx, nullptr);
 #endif
 
-        return primaryPressed && modifierPressed;
-    }
+// The buttons that matter for the mapping, as a bitmask.
+uint16_t heldButtons(PS3BT *pad) {
+    uint16_t held = 0;
+    if (pad->getButtonPress(UP))
+        held |= sm::kHeldUp;
+    if (pad->getButtonPress(RIGHT))
+        held |= sm::kHeldRight;
+    if (pad->getButtonPress(DOWN))
+        held |= sm::kHeldDown;
+    if (pad->getButtonPress(LEFT))
+        held |= sm::kHeldLeft;
+    if (pad->getButtonPress(L3))
+        held |= sm::kHeldL3;
+    if (pad->getButtonPress(PS))
+        held |= sm::kHeldPs;
+    if (pad->getButtonPress(L1))
+        held |= sm::kHeldL1;
+    if (pad->getButtonPress(L2))
+        held |= sm::kHeldL2;
+    if (pad->getButtonPress(CIRCLE))
+        held |= sm::kHeldCircle;
+    if (pad->getButtonPress(CROSS))
+        held |= sm::kHeldCross;
+    return held;
 }
 
-// Function to process simple button mappings for a controller
-bool processSimpleButtonMappings(PS3BT *controller, const SimpleButtonMapping *mappings, size_t count,
-                                 int buttonCounter) {
-    if (buttonCounter != 1)
-        return false;  // Only process on first button press
+sm::PadState padState(PS3BT *pad) {
+    const bool connected = pad->PS3NavigationConnected;
+    return {connected, connected ? heldButtons(pad) : static_cast<uint16_t>(0)};
+}
 
-    for (size_t i = 0; i < count; ++i) {
-        const SimpleButtonMapping &mapping = mappings[i];
-        if (isSimpleButtonComboPressed(controller, mapping.primary, mapping.modifier)) {
-            marcDuinoButtonPush(1, mapping.functionCode);
+// Button combos to WCB stored commands (see sm::Runtime for the repeat timing).
+void mappedButtons() {
+    sm::FiredPress fired;
+    if (!mapRuntime.buttons(millis(), padState(PS3NavFoot), padState(PS3NavDome), &fired))
+        return;
 
 #ifdef SHADOW_VERBOSE
-            output += "[";
-            output += getControllerName(controller);
-            output += "] ACTIVATED: ";
-            if (mapping.modifier != NO_MODIFIER) {
-                output += getButtonName(mapping.primary);
-                output += " + ";
-                output += getButtonName(mapping.modifier);
-            } else {
-                output += getButtonName(mapping.primary);
-            }
-            output += " -> ";
-            output += mapping.description;  // Use description from mapping
-            output += " (";
-            output += mapping.functionCode;
-            output += ")\r\n";
+    char name[16];
+    sm::formatSlot(name, sizeof(name), fired.slot);
+    output += "ACTIVATED: ";
+    output += name;
+    output += " -> ";
+    output += fired.key[0] != '\0' ? fired.key : "(unmapped)";
+    if (fired.modFromOther)
+        output += " (modifier held on the other controller)";
+    if (fired.key[0] != '\0' && !fired.queued)
+        output += " [WCB queue full, dropped]";
+    output += "\r\n";
 #endif
-            return true;  // Found and processed a button press
-        }
-    }
-    return false;  // No button combination found
 }
 
-// Simplified foot controller button processing
-void simpleMarcDuinoFoot() {
-    // Check if any directional buttons or L3 are pressed
-    // Also check PS if L1 or L2 is held (for PS+L1/L2 combos)
-    if (!PS3NavFoot->PS3NavigationConnected ||
-        !(PS3NavFoot->getButtonPress(UP) || PS3NavFoot->getButtonPress(DOWN) || PS3NavFoot->getButtonPress(LEFT) ||
-          PS3NavFoot->getButtonPress(RIGHT) || PS3NavFoot->getButtonPress(L3) ||
-          (PS3NavFoot->getButtonPress(PS) && (PS3NavFoot->getButtonPress(L1) || PS3NavFoot->getButtonPress(L2))))) {
-        return;
-    }
-
-    // Handle button counter timing (same as original)
-    if ((millis() - previousMarcDuinoMillis) > 1000) {
-        marcDuinoButtonCounter = 0;
-        previousMarcDuinoMillis = millis();
-    }
-    marcDuinoButtonCounter += 1;
-
-    // Clear inbound buffer
-    while (Serial1.available())
-        Serial1.read();
-
-    // Process using simple table-driven approach
-    processSimpleButtonMappings(PS3NavFoot, footButtonMappings, footButtonMappingsCount, marcDuinoButtonCounter);
-}
-
-// Simplified dome controller button processing
-void simpleMarcDuinoDome() {
-    // Check if any directional buttons or L3 are pressed
-    // Also check PS if L1 or L2 is held (for PS+L1/L2 combos)
-    if (!PS3NavDome->PS3NavigationConnected ||
-        !(PS3NavDome->getButtonPress(UP) || PS3NavDome->getButtonPress(DOWN) || PS3NavDome->getButtonPress(LEFT) ||
-          PS3NavDome->getButtonPress(RIGHT) || PS3NavDome->getButtonPress(L3) ||
-          (PS3NavDome->getButtonPress(PS) && (PS3NavDome->getButtonPress(L1) || PS3NavDome->getButtonPress(L2))))) {
-        return;
-    }
-
-    // Handle button counter timing (same as original)
-    if ((millis() - previousMarcDuinoMillis) > 1000) {
-        marcDuinoButtonCounter = 0;
-        previousMarcDuinoMillis = millis();
-    }
-    marcDuinoButtonCounter += 1;
-
-    // Clear inbound buffer
-    while (Serial1.available())
-        Serial1.read();
-
-    // Process using simple table-driven approach
-    processSimpleButtonMappings(PS3NavDome, domeButtonMappings, domeButtonMappingsCount, marcDuinoButtonCounter);
-}
+// Everything the mapping does between button presses. Runs every pass, faults included, but
+// SHADOW doesn't announce itself to the WCB while a controller fault is active.
+void serviceMapping(bool faulted) { mapRuntime.service(millis(), Serial1, !faulted); }
 
 // =======================================================================================
 //                          Main Program
@@ -447,6 +328,27 @@ void setup() {
     randomSeed(analogRead(0));  // random number seed for dome automation
 
     Serial1.print("P1\r");  // Set Magic Panel to Always On
+
+    // Button mapping: reads the EEPROM headers once; everything after this is non-blocking.
+    mapStore.begin();
+#ifdef SHADOW_VERBOSE
+    output += "Button mapping: ";
+    if (mapStore.formatted()) {
+        output += mapStore.validEepromSlots();
+        output += " slot(s) from EEPROM, the rest built-in";
+    } else {
+        output += "built-in defaults";
+    }
+    output += ", prefix ";
+    output += mapStore.prefix();
+    output += "\r\n";
+    output += "Firmware ";
+    output += SHADOW_FW_VERSION;
+    output += "\r\n";
+#endif
+
+    // First WCB device announce in 0.5-3 s (if SHADOW_WDP_ANNOUNCE is on).
+    mapRuntime.startAnnounce(millis(), static_cast<uint32_t>(random()));
 }
 
 // =======================================================================================
@@ -813,8 +715,8 @@ void ps3ToggleSettings(PS3BT *myPS3 = PS3NavFoot) {
         }
     }
 
-    // Enable and Disable Overspeed
-    if (myPS3->getButtonPress(L3) && myPS3->getButtonPress(L1) && isStickEnabled) {
+    // Enable and Disable Overspeed (foot controller only: dome L3+L1 is a mapped combo)
+    if (myPS3 == PS3NavFoot && myPS3->getButtonPress(L3) && myPS3->getButtonPress(L1) && isStickEnabled) {
         if ((millis() - previousSpeedToggleMillis) > 1000) {
             speedToggleButtonCounter = 0;
             previousSpeedToggleMillis = millis();
@@ -867,290 +769,6 @@ void toggleSettings() {
     if (PS3NavDome->PS3NavigationConnected)
         ps3ToggleSettings(PS3NavDome);
 }
-
-// =======================================================================================
-// This is the main MarcDuino Button Management Function
-// =======================================================================================
-void marcDuinoButtonPush(int type, int MD_func) {
-    if (type == 1)  // Std Marcduino Function Call Configured
-    {
-        switch (MD_func) {
-            case 2:  // Scream
-                Serial1.print(";W1;Cscream\r");
-                break;
-
-            case 7:  // Short circuit
-                Serial1.print(";W1;Cshortcircuit\r");
-                break;
-
-            case 9:  // Leia Mode
-                Serial1.print(";W1;Cleia\r");
-                break;
-
-            case 10:  // DISCO MODE
-                Serial1.print(";W1;Cdisco\r");
-                break;
-
-            case 26:  // Volume Up
-
-                if (volume == 100) {
-                 //   Serial1.print("<SS0>\r");    // HCR Mild Sad
-                    Serial1.print("R0051|5\r");  // Set Rear Holo to Red for 5sec
-                } else {
-                    volume = volume + volumeInterval;
-                    toSerial = "<PVV";
-                    toSerial = toSerial + volume + ",PVA" + volume + ",PVB" + volume + ">\r";
-                    Serial1.print(toSerial);
-
-                    Serial1.print("R0053|1\r");  // Turn Rear Holo Green for 1sec
-                }
-
-                break;
-
-            case 27:  // Volume Down
-                if (volume == 0) {
-                    Serial1.print("R0051|5\r");  // Set Rear Holo to Red for 5sec
-                } else {
-                    volume = volume - volumeInterval;
-                    toSerial = "<PVV";
-                    toSerial = toSerial + volume + ",PVA" + volume + ",PVB" + volume + ">\r";
-                    Serial1.print(toSerial);
-
-                    Serial1.print("R0051|1\r");  // Turn Rear Holo Red for 1sec
-                }
-
-                break;
-
-            case 28:                                        // Volume Max
-                Serial1.print("<PVV100,PVA100,PVB100>\r");  // HCR Volume 100
-
-                volume = 100;
-
-                Serial1.print("R0058|1\r");  // Turn Rear Holo Purple for 1sec
-
-                break;
-
-            case 29:                                     // Volume Mid
-                Serial1.print("<PVV10,PVA10,PVB10>\r");  // HCR Volume 50
-
-                volume = 10;
-
-                Serial1.print("R0059|2\r");  // Turn Rear Holo White for 1sec
-
-                break;
-
-            case 76:  // Magic Panel On
-                Serial1.print(";W1;Cmagicpanelon\r");
-                break;
-
-            case 77:  // Magic Panel Off
-                Serial1.print(";W1;Cmagicpaneloff\r");
-                break;
-
-            case 78:  // Magic Panel Flicker
-                Serial1.print(";W1;Cmagicpanelflicker\r");
-                break;
-
-            case 79:  // Reset - Silent
-                Serial1.print(";W1;Cresetsilent\r");
-                break;
-
-            case 80:  // Reset - Chatty
-                Serial1.print(";W1;Cresetchatty\r");
-                break;
-
-            case 81:  // Yes
-                Serial1.print(";W1;Cyes\r");
-                break;
-
-            case 82:  // No
-                Serial1.print(";W1;Cno\r");
-                break;
-
-            case 83:  // Imperial March
-                Serial1.print(";W1;Cimperialmarch\r");
-                break;
-
-            case 84:  // Random Happy Sound
-                Serial1.print(";W1;Chappysound\r");
-                break;
-
-            case 85:  // Random Holo Twitch
-                Serial1.print(";W1;Cholotwitch\r");
-                break;
-
-            case 86:  // TEMP Open Body Servos
-                break;
-
-            case 87:  // TEMP Close Body Servos
-                break;
-
-            case 88:  // Front Holo Up
-                Serial1.print(";W1;Cfrontholoup\r");
-                break;
-
-            case 89:  // Front Holo Left
-                Serial1.print(";W1;Cfronthololeft\r");
-                break;
-
-            case 90:  // Front Holo Right
-                Serial1.print(";W1;Cfrontholoright\r");
-                break;
-
-            case 91:  // Front Holo Down
-                Serial1.print(";W1;Cfrontholodown\r");
-                break;
-
-            case 92:  // Front Holo Center
-                Serial1.print(";W1;Cfrontholocenter\r");
-                break;
-
-            case 93:  // Random Scared Sound
-                Serial1.print(";W1;Cscaredsound\r");
-                break;
-
-            case 94:  // Random Sad Sound
-                Serial1.print(";W1;Csadsound\r");
-                break;
-
-            case 95:  // Raspberry
-                Serial1.print(";W1;Craspberry\r");
-                break;
-
-            case 96:  // Love
-                Serial1.print(";W1;Clove\r");
-                break;
-
-            case 97:  // Jedi Theme
-                Serial1.print(";W1;Cjeditheme\r");
-                break;
-
-            case 98:                     // Brightness Down
-                Serial1.print("1P1\r");  // Use Software Brightness
-
-                brightness = brightness - brightnessInterval;
-
-                toSerial = "2P";
-                toSerial = toSerial + brightness + "\r";
-                Serial1.print(toSerial);  // Lower brightness by Interval
-                break;
-
-            case 99:                     // Brightness Mid
-                Serial1.print("1P1\r");  // Use Software Brightness
-
-                brightness = 100;
-
-                Serial1.print("2P100\r");  // Lower brightness by Interval
-                break;
-
-            case 100:                    // Brightness Up
-                Serial1.print("1P1\r");  // Use Software Brightness
-
-                brightness = brightness + brightnessInterval;
-
-                toSerial = "2P";
-                toSerial = toSerial + brightness + "\r";
-                Serial1.print(toSerial);  // Lower brightness by Interval
-                break;
-
-            case 101:                    // Brightness Max
-                Serial1.print("1P1\r");  // Use Software Brightness
-
-                brightness = 200;
-
-                Serial1.print("2P200\r");  // Lower brightness by Interval
-                break;
-
-            case 102:  // Toggle Body Door
-                break;
-
-            case 103:  // Toggle Utility Arms
-
-                break;
-
-            case 104:  // Scanning
-                Serial1.print(";W1;Cscanning\r");
-                break;
-
-            case 105:  // Alarm
-                Serial1.print(";W1;Calarm\r");
-                break;
-
-            case 106:  // Random Angry Sound
-                Serial1.print(";W1;Cangrysound\r");
-                break;
-
-            case 107:  // Cantina
-                Serial1.print(";W1;Ccantina\r");
-                break;
-
-            case 108:  // Extreme Sad Sound
-                Serial1.print(";W1;Cextremesadsound\r");
-                break;
-
-            case 109:                                     // Extreme Happy
-                Serial1.print(";W1;Cextremehappysou\r");  // Intentionally short due to 15-character limit on WCBs
-                break;
-
-            case 110:  // Single Muse
-                Serial1.print(";W1;Csinglemuse\r");
-                break;
-
-            case 111:  // Extreme Angry
-                Serial1.print(";W1;Cextremeangrysou\r");
-                break;
-
-            case 112:  // GD Collar
-                Serial1.print(";W1;CGDcollar\r");
-                break;
-
-
-            case 113:  // GD Download
-                Serial1.print(";W1;CGDdownload\r");
-                break;
-
-
-            case 114:  // GD Success
-                Serial1.print(";W1;CGDsuccess\r");
-                break;
-
-
-            case 115:  // C2's Song
-                Serial1.print(";W1;CGDc2song\r");
-                break;
-
-            case 116:  // Empire Needs you
-                Serial1.print(";W1;CGDrecruitsong\r");
-                break;
-
-            case 117:  // MahnaMahna
-                Serial1.print(";W1;Cmahna\r");
-                break;
-
-            case 118:  // RedLight
-                Serial1.print(";W1;Credlight\r");
-                break;
-        }
-
-    }  // End Std Marcduino Function Calls
-
-
-    // All type = 2 logic has been removed since we only use type = 1
-}
-
-// ====================================================================================================================
-// This function determines if MarcDuino buttons were selected and calls main processing function for FOOT controller
-// ====================================================================================================================
-// NOTE: This function has been replaced by simpleMarcDuinoFoot() which uses a table-driven approach
-// All button mappings are now configured in the footButtonMappings array above
-
-// ===================================================================================================================
-// This function determines if MarcDuino buttons were selected and calls main processing function for DOME Controller
-// ===================================================================================================================
-// NOTE: This function has been replaced by simpleMarcDuinoDome() which uses a table-driven approach
-// All button mappings are now configured in the domeButtonMappings array above
-
-// =======================================================================================
 
 // =======================================================================================
 //                             Dome Automation Function
@@ -1743,17 +1361,22 @@ void loop() {
 
     // LOOP through functions from highest to lowest priority.
 
+    // Mapping edits from DroidNet (via the WCB) or the USB port. Never blocks.
+    mapRuntime.pump(Serial1, wcbLines, wcbReplies);
+    mapRuntime.pump(Serial, usbLines, usbReplies);
+
     if (!readUSB()) {
         // We have a fault condition that we want to ensure that we do NOT process any controller data!!!
+        serviceMapping(true);
         printOutput();
         return;
     }
 
     footMotorDrive();
     domeDrive();
-    simpleMarcDuinoDome();  // NEW: Table-driven dome button processing
-    simpleMarcDuinoFoot();  // NEW: Table-driven foot button processing
+    mappedButtons();
     toggleSettings();
+    serviceMapping(false);
     printOutput();
 
     // If dome automation is enabled - Call function

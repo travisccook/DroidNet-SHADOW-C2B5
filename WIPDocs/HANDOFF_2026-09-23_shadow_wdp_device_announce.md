@@ -1,5 +1,11 @@
 # Handoff: SHADOW sends WDP Device Announce, then flash it (2026-09-23)
 
+> **Update 2026-09-24: the announce is implemented** by [PR #1](https://github.com/travisccook/SHADOW-C2B5/pull/1)
+> (runtime button mapping), following the decisions below with one exception: SHADOW now also reads Serial1, for
+> DroidNet's `@SM` mapping requests. [HANDOFF_BUTTON_MAP.md](HANDOFF_BUTTON_MAP.md) section 3 compares the two point by
+> point. Don't implement the announce again. The flashing, checking and electrical sections below still apply, and
+> that handoff's section 4 uses them.
+
 **For:** a new session started in `~/Repos/SHADOW-C2B5`.
 **Goal:** SHADOW announces itself to WCB 1 with WDP-DA, and the new firmware is flashed to the Mega ADK on c2-body.
 **Status:** Nothing is written yet. The design was agreed on 2026-09-22 and is recorded below. Everything here was
