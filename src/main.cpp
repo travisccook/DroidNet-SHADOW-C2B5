@@ -88,6 +88,7 @@
 #include <PS3BT.h>
 #include <usbhub.h>
 #include "../lib/Sabertooth/Sabertooth.h"
+#include "../lib/WdpAnnounce/WdpAnnounce.h"
 #include "../include/config.h"
 
 // ---------------------------------------------------------------------------------------
@@ -398,6 +399,33 @@ void simpleMarcDuinoDome() {
 }
 
 // =======================================================================================
+//                     WDP Device Announce to WCB 1
+// =======================================================================================
+// Every 25-30 s SHADOW tells WCB 1 what it is, so the WCB mesh labels this port "Shadow"
+// and ?WDP,DA on WCB 1 shows the firmware revision. Announce only: nothing is read back.
+// The line is sent only when Serial1's TX buffer can take all of it, so it never blocks.
+
+#ifndef GIT_REV
+#error "GIT_REV is not defined: platformio.ini must run scripts/git_rev.py as a build flag"
+#endif
+
+static const char WDP_ANNOUNCE_LINE[] PROGMEM = "@WDP1 {\"type\":\"Shadow\",\"fw\":\"" GIT_REV "\"}\r";
+static_assert(sizeof(WDP_ANNOUNCE_LINE) - 1 <= wdp::kMaxLineLen,
+              "WDP announce line must fit in Serial1's TX buffer or it is never sent");
+static_assert(sizeof(GIT_REV) - 1 <= wdp::kMaxFwLen, "GIT_REV must be 14 characters or fewer");
+
+wdp::AnnounceTimer wdpTimer;
+
+void wdpAnnounceTick() {
+    const size_t lineLen = sizeof(WDP_ANNOUNCE_LINE) - 1;
+    if (!wdpTimer.ready(millis(), Serial1.availableForWrite(), lineLen)) {
+        return;
+    }
+    Serial1.print(reinterpret_cast<const __FlashStringHelper *>(WDP_ANNOUNCE_LINE));
+    wdpTimer.markSent(millis(), random(wdp::kIntervalMinMs, wdp::kIntervalMaxMs + 1));
+}
+
+// =======================================================================================
 //                          Main Program
 // =======================================================================================
 
@@ -447,6 +475,8 @@ void setup() {
     randomSeed(analogRead(0));  // random number seed for dome automation
 
     Serial1.print("P1\r");  // Set Magic Panel to Always On
+
+    wdpTimer.start(millis(), random(wdp::kFirstDelayMinMs, wdp::kFirstDelayMaxMs + 1));
 }
 
 // =======================================================================================
@@ -1754,6 +1784,7 @@ void loop() {
     simpleMarcDuinoDome();  // NEW: Table-driven dome button processing
     simpleMarcDuinoFoot();  // NEW: Table-driven foot button processing
     toggleSettings();
+    wdpAnnounceTick();  // after the readUSB() fault return: no announce while a controller fault is active
     printOutput();
 
     // If dome automation is enabled - Call function
