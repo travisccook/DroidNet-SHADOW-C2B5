@@ -2,8 +2,10 @@
 
 **Status:** implemented in firmware 2.0.0 on `claude/arduino-command-mapping-config-x49d73`. It is
 tested on the host, on an emulated ATmega2560 (simavr), and against the reference Pi client.
-**It has not run on the droid yet.** The DroidNet side is designed but not built. See
-[DROIDNET_INTEGRATION.md](DROIDNET_INTEGRATION.md) and the UI in [droidnet-ui/](droidnet-ui/).
+**It has not run on the droid yet.** The DroidNet side is designed but not built. Its design and UI live in the
+DroidNetSignalBooster repo: [backend design](https://github.com/travisccook/DroidNetSignalBooster/blob/main/docs/superpowers/specs/2026-09-24-shadow-button-map-design.md) and
+[UI design and mockup](https://github.com/travisccook/DroidNetSignalBooster/blob/main/docs/superpowers/specs/2026-09-24-shadow-button-map-ui-design.md). Work in progress is tracked in
+[HANDOFF_BUTTON_MAP.md](HANDOFF_BUTTON_MAP.md).
 
 ## What it does
 
@@ -285,6 +287,6 @@ python3 -m unittest tools/shadowmap/test_shadowmap.py   # reference client vs. t
 
 - Run it on the droid. That means flashing, checking `[WDP-DA]` shows SHADOW on the Pi's WCB, then
   `tools/shadowmap/shadowmap.py --wcb ... dump`.
-- The DroidNet tab and backend (see [DROIDNET_INTEGRATION.md](DROIDNET_INTEGRATION.md)).
+- The DroidNet tab and backend (see the [backend design](https://github.com/travisccook/DroidNetSignalBooster/blob/main/docs/superpowers/specs/2026-09-24-shadow-button-map-design.md)).
 - New WCB stored commands for volume and brightness, then map them.
 - Maybe: a "learn" mode (report a press without firing it) and a lock notice. Neither is built.
