@@ -118,6 +118,8 @@ static void test_prefix_and_suffix_validation() {
     TEST_ASSERT_FALSE(sm::isValidPrefix(";W1;"));   // ";" + key could read as ";t..."
     TEST_ASSERT_FALSE(sm::isValidPrefix(";W1^C"));
     TEST_ASSERT_FALSE(sm::isValidPrefix(";W1 C"));
+    TEST_ASSERT_FALSE(sm::isValidPrefix(";T1;W;C"));  // a WCB timer command
+    TEST_ASSERT_FALSE(sm::isValidPrefix(";W1;tC"));
 
     TEST_ASSERT_TRUE(sm::isValidSuffix(""));
     TEST_ASSERT_TRUE(sm::isValidSuffix(",L"));
@@ -125,6 +127,9 @@ static void test_prefix_and_suffix_validation() {
     TEST_ASSERT_FALSE(sm::isValidSuffix("12345678"));
     TEST_ASSERT_FALSE(sm::isValidSuffix("^;C"));
     TEST_ASSERT_FALSE(sm::isValidSuffix(", L"));
+    TEST_ASSERT_FALSE(sm::isValidSuffix(";t5"));
+    TEST_ASSERT_FALSE(sm::isValidSuffix(",;T"));
+    TEST_ASSERT_TRUE(sm::isValidSuffix(",T"));
 }
 
 int runAllTests() {

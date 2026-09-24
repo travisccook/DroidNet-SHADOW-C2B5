@@ -33,7 +33,8 @@ bool LineReader::feed(char c) {
 }
 
 void LineReader::consume() {
-    state_ = State::Collect;
+    state_ = resync_ ? State::Skip : State::Collect;
+    resync_ = false;
     len_ = 0;
     buf_[0] = '\0';
 }

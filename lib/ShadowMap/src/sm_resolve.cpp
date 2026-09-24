@@ -21,9 +21,16 @@ struct BtnBit {
     uint16_t bit;
 };
 
+// Directions first, then PS and L3. The L1 layer checks L3 before PS and every other layer PS
+// before L3, which is what the old tables' row order did (dome L1+L3 is Front Holo Center,
+// foot L2+PS is MahnaMahna), so no combo changes meaning.
 const BtnBit kBtnOrder[] = {
     {Btn::UP, kHeldUp}, {Btn::LEFT, kHeldLeft}, {Btn::RIGHT, kHeldRight},
     {Btn::DOWN, kHeldDown}, {Btn::PS, kHeldPs}, {Btn::L3, kHeldL3},
+};
+const BtnBit kBtnOrderL1[] = {
+    {Btn::UP, kHeldUp}, {Btn::LEFT, kHeldLeft}, {Btn::RIGHT, kHeldRight},
+    {Btn::DOWN, kHeldDown}, {Btn::L3, kHeldL3}, {Btn::PS, kHeldPs},
 };
 
 bool modifierHeld(const ModBit &m, const PadState &self, const PadState &other) {
@@ -33,7 +40,7 @@ bool modifierHeld(const ModBit &m, const PadState &self, const PadState &other) 
 }
 
 uint8_t firstPrimaryInLayer(Ctrl ctrl, Mod mod, uint16_t held) {
-    for (const BtnBit &b : kBtnOrder) {
+    for (const BtnBit &b : (mod == Mod::L1 ? kBtnOrderL1 : kBtnOrder)) {
         if (mod == Mod::PS && b.btn == Btn::PS)
             continue;  // PS can't be its own modifier
         if (held & b.bit)
@@ -51,15 +58,20 @@ bool gateOpen(uint16_t held) {
     return (held & kHeldPs) && (held & (kHeldL1 | kHeldL2));
 }
 
-uint8_t resolveSlot(Ctrl ctrl, const PadState &self, const PadState &other) {
+uint8_t resolveSlot(Ctrl ctrl, const PadState &self, const PadState &other, bool *modFromOther) {
+    if (modFromOther != nullptr)
+        *modFromOther = false;
     if (!self.connected || !gateOpen(self.held))
         return kNoSlot;
     for (const ModBit &m : kModOrder) {
         if (!modifierHeld(m, self, other))
             continue;
         const uint8_t slot = firstPrimaryInLayer(ctrl, m.mod, self.held);
-        if (slot != kNoSlot)
+        if (slot != kNoSlot) {
+            if (modFromOther != nullptr)
+                *modFromOther = (self.held & m.bit) == 0;
             return slot;
+        }
     }
     return firstPrimaryInLayer(ctrl, Mod::NONE, self.held);
 }

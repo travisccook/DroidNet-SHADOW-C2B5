@@ -49,6 +49,26 @@ static void test_primary_priority() {
     TEST_ASSERT_EQUAL_UINT8(slotIndex(Ctrl::F, Mod::NONE, Btn::L3), foot(kHeldL3));
     // PS as the modifier never picks PS as the button.
     TEST_ASSERT_EQUAL_UINT8(slotIndex(Ctrl::F, Mod::PS, Btn::L3), foot(kHeldPs | kHeldL3));
+    // L3 before PS in the L1 layer, PS before L3 elsewhere (the old tables' order).
+    TEST_ASSERT_EQUAL_UINT8(slotIndex(Ctrl::D, Mod::L1, Btn::L3),
+                            resolveSlot(Ctrl::D, {true, kHeldL1 | kHeldL3 | kHeldPs}, kOff));
+    TEST_ASSERT_EQUAL_UINT8(slotIndex(Ctrl::F, Mod::L1, Btn::L3), foot(kHeldL1 | kHeldL3 | kHeldPs));
+    TEST_ASSERT_EQUAL_UINT8(slotIndex(Ctrl::F, Mod::L2, Btn::PS), foot(kHeldL2 | kHeldL3 | kHeldPs));
+}
+
+static void test_reports_where_the_modifier_came_from() {
+    bool fromOther = true;
+    TEST_ASSERT_EQUAL_UINT8(slotIndex(Ctrl::F, Mod::CROSS, Btn::UP),
+                            resolveSlot(Ctrl::F, {true, kHeldUp}, {true, kHeldCross}, &fromOther));
+    TEST_ASSERT_TRUE(fromOther);
+    resolveSlot(Ctrl::F, {true, kHeldUp | kHeldCross}, {true, kHeldCross}, &fromOther);
+    TEST_ASSERT_FALSE(fromOther);  // held on both: this controller counts
+    resolveSlot(Ctrl::F, {true, kHeldUp | kHeldL1}, {true, kHeldCross}, &fromOther);
+    TEST_ASSERT_FALSE(fromOther);  // L1 decided
+    resolveSlot(Ctrl::F, {true, kHeldUp}, kOff, &fromOther);
+    TEST_ASSERT_FALSE(fromOther);
+    TEST_ASSERT_EQUAL_UINT8(kNoSlot, resolveSlot(Ctrl::F, {true, 0}, kOff, &fromOther));
+    TEST_ASSERT_FALSE(fromOther);
 }
 
 static void test_reserved_combo_resolves_to_its_slot() {
@@ -80,5 +100,6 @@ int runAllTests() {
     RUN_TEST(test_primary_priority);
     RUN_TEST(test_reserved_combo_resolves_to_its_slot);
     RUN_TEST(test_cross_controller_modifiers);
+    RUN_TEST(test_reports_where_the_modifier_came_from);
     return UNITY_END();
 }

@@ -61,7 +61,7 @@ The script updates existing rows, adds rows for new combinations, backs up the s
 ### Communication Protocols
 
 - **WCB**: `;W1;C<name>` tells WCB 1 to run its stored command `<name>`. Every mapped button sends `<prefix><key><suffix>\r` (default prefix `;W1;C`)
-- **@SM**: SHADOW's button-mapping protocol (see `WIPDocs/COMMAND_MAPPING_DESIGN.md`). Nothing SHADOW sends to the WCB may be a bare line (it gets broadcast to every board) or contain `^` or `;T`
+- **@SM**: SHADOW's button-mapping protocol (see `WIPDocs/COMMAND_MAPPING_DESIGN.md`). Nothing SHADOW sends to the WCB may be a bare line (it gets broadcast to every board) or contain `^` or `;T`. The one bare line is the `@WDP1` device announce, which WCB 6.2.1+ captures; comment out `SHADOW_WDP_ANNOUNCE` for older WCB firmware
 - **HCR Vocalizer**: `<...>` commands, routed through the WCB. Docs: https://docs.humancyborgrelations.com/astromech/platforms/embedded/commands
 - **MarcDuino / JawaLite**: legacy astromech command formats used by the dome boards
 

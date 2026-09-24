@@ -41,9 +41,10 @@ enum class Source : uint8_t { Eeprom, Default, Reserved };
 // "" (unmapped) or 1-15 of [A-Za-z0-9_].
 bool isValidKey(const char *key);
 // 1-11 printable characters, starting with ';' so a command is never a bare (broadcast)
-// line, not ending with ';' (";t..." would read as a WCB timer command), and no '^'.
+// line, with no '^' (the WCB's delimiter) and no ";T"/";t" (a WCB timer command), and not
+// ending with ';' (";" + a key starting with t would make one).
 bool isValidPrefix(const char *prefix);
-// 0-7 printable characters, no '^'.
+// 0-7 printable characters, no '^' and no ";T"/";t".
 bool isValidSuffix(const char *suffix);
 
 class MapStore {

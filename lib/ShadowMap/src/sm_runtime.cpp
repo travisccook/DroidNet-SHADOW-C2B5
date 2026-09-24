@@ -6,31 +6,19 @@
 
 namespace sm {
 
-namespace {
-
-// True when the slot's modifier is one that counts from either controller and this
-// controller isn't the one holding it.
-bool modifierFromOther(uint8_t slot, const PadState &self) {
-    switch (slotMod(slot)) {
-        case Mod::PS:
-            return !(self.held & kHeldPs);
-        case Mod::CIRCLE:
-            return !(self.held & kHeldCircle);
-        case Mod::CROSS:
-            return !(self.held & kHeldCross);
-        default:
-            return false;
-    }
-}
-
-}  // namespace
-
 bool Runtime::buttons(uint32_t nowMs, const PadState &foot, const PadState &dome, FiredPress *fired) {
     protocol_.setPads(foot.connected, dome.connected);
     bool any = false;
-    if (deferredSlot_ != kNoSlot && fire(deferredSlot_, deferredFromOther_, fired)) {
-        deferredSlot_ = kNoSlot;
-        any = true;
+    if (deferredSlot_ != kNoSlot) {
+        // Only while it's still fresh and its controller is still there (a fault can hold up
+        // the passes in between).
+        const PadState &pad = slotCtrl(deferredSlot_) == Ctrl::F ? foot : dome;
+        if (!pad.connected || nowMs - deferredAt_ > kDeferMaxMs) {
+            deferredSlot_ = kNoSlot;
+        } else if (fire(deferredSlot_, deferredFromOther_, fired)) {
+            deferredSlot_ = kNoSlot;
+            any = true;
+        }
     }
     any = handlePad(Ctrl::D, dome, foot, nowMs, fired) || any;
     any = handlePad(Ctrl::F, foot, dome, nowMs, fired) || any;
@@ -50,13 +38,14 @@ bool Runtime::handlePad(Ctrl ctrl, const PadState &self, const PadState &other, 
     if (repeatCount_ != 1)
         return false;
 
-    const uint8_t slot = resolveSlot(ctrl, self, other);
+    bool fromOther = false;
+    const uint8_t slot = resolveSlot(ctrl, self, other, &fromOther);
     if (slot == kNoSlot)
         return false;
-    const bool fromOther = modifierFromOther(slot, self);
     if (!fire(slot, fromOther, fired)) {
         deferredSlot_ = slot;  // EEPROM mid-write: send it next pass
         deferredFromOther_ = fromOther;
+        deferredAt_ = nowMs;
         return false;
     }
     return true;

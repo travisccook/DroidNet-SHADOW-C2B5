@@ -80,6 +80,8 @@ tests/unit/test_shadow_link.py  against shadow_sim through the WCB emulator (see
   and a reboot clears both.
   - While a tab is open, send `HELLO` every 20 s and `EVENTS 1` after each `READY`. Both are
     cheap and idempotent.
+  - After a request goes unanswered through all its retries, send `HELLO` (and `EVENTS 1`)
+    before giving up. The reference client does this.
   - With no tab open, send `EVENTS 0` once and stop polling.
 
 ### Route and discovery

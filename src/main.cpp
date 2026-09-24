@@ -195,10 +195,13 @@ sm::Protocol mapProtocol(mapStore, SHADOW_FW_VERSION);
 sm::LineReader wcbLines;
 sm::LineReader usbLines;
 
-// Replies to "@SM" requests typed on the USB port go out with the debug output.
+// Replies to "@SM" requests typed on the USB port go out with the debug output. A reply waits
+// until `output` is nearly empty, so printOutput()'s write stays short (the UART buffer holds
+// 64 bytes; 128 bytes at 115200 is under 6 ms).
 class UsbReplyPort final : public sm::ReplyPort {
   public:
-    bool canSend(uint8_t len) override { return output.length() + len < 400; }
+    static constexpr unsigned kBudget = 128;
+    bool canSend(uint8_t len) override { return output.length() + len + 4 <= kBudget; }
     void send(const char *line, uint8_t len) override {
         (void)len;
         output += "\r\n";  // start a fresh line even if debug text didn't end one
@@ -252,7 +255,6 @@ void mappedButtons() {
     sm::FiredPress fired;
     if (!mapRuntime.buttons(millis(), padState(PS3NavFoot), padState(PS3NavDome), &fired))
         return;
-    wcbTx.drain(Serial1);  // send it now rather than at the end of the pass
 
 #ifdef SHADOW_VERBOSE
     char name[16];

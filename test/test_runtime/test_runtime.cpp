@@ -180,6 +180,61 @@ static void test_press_waits_while_eeprom_is_mid_write() {
     TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MapStore::Completion::Done), static_cast<uint8_t>(rig->store.takeCompletion()));
 }
 
+// Starts a slow EEPROM write and makes F NONE RIGHT need an EEPROM read, so a press on it
+// gets deferred. Returns the time to carry on from.
+uint32_t deferAPress(uint32_t t) {
+    rig->store.beginSet(slotIndex(Ctrl::F, Mod::NONE, Btn::RIGHT), "custom");
+    while (rig->store.busy())
+        pass(t++, held(0));
+    rig->eeprom.writeTicks = 200;  // a very slow EEPROM
+    rig->store.beginSet(slotIndex(Ctrl::D, Mod::L2, Btn::UP), "longkeyvalue123");
+    pass(t++, held(0));
+    t += 2000;
+    TEST_ASSERT_FALSE(pass(t++, held(kHeldRight)));
+    return t;
+}
+
+static void test_deferred_press_is_dropped_if_the_controller_drops() {
+    uint32_t t = deferAPress(0);
+    pass(t++, kOff);  // foot controller gone
+    rig->eeprom.writeTicks = 1;
+    for (int i = 0; i < 400; ++i)
+        pass(t++, kOff);
+    TEST_ASSERT_EQUAL_UINT32(0, rig->wcb.commands.count);
+}
+
+static void test_deferred_press_is_dropped_when_stale() {
+    uint32_t t = deferAPress(0);
+    // The EEPROM stays busy (a fault holding up passes would look the same) past the limit.
+    t += Runtime::kDeferMaxMs + 1;
+    rig->eeprom.busy = 0;
+    rig->eeprom.writeTicks = 1;
+    for (int i = 0; i < 400; ++i)
+        pass(t++, held(0));
+    TEST_ASSERT_EQUAL_UINT32(0, rig->wcb.commands.count);
+}
+
+static void test_pump_keeps_the_uart_drained_while_a_reply_waits() {
+    // Leave no room for replies, then send a request followed by a flood of noise.
+    const char *filler[] = {";filler filler filler filler filler filler filler filler filler filler"};
+    rig->wcb.room = 0;
+    while (rig->tx.pushLine(filler, 1)) {
+    }
+    char req[64];
+    withCrc("@SM GET D CROSS LEFT", req, sizeof(req));
+    char stream[200];
+    snprintf(stream, sizeof(stream), "%s\r%s", req, "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
+    rig->in.load(stream);
+    rig->runtime.pump(rig->in, rig->reader, rig->wcbPort);
+    TEST_ASSERT_TRUE(rig->reader.ready());  // held: no room to reply
+    rig->runtime.pump(rig->in, rig->reader, rig->wcbPort);
+    TEST_ASSERT_EQUAL_UINT32(rig->in.len, rig->in.pos);  // and the noise was read, not left to overflow
+    // Once there's room, the held request is answered.
+    for (uint32_t t = 1; t < 400 && rig->wcb.usb.count == 0; ++t)
+        pass(t, held(0));
+    TEST_ASSERT_TRUE(piSawRecently("@SM SLOT D CROSS LEFT scanning default def=scanning"));
+}
+
 static void test_pump_reads_requests_through_noise() {
     char req[64];
     withCrc("@SM HELLO", req, sizeof(req));
@@ -275,6 +330,9 @@ int runAllTests() {
     RUN_TEST(test_unmapped_and_reserved_send_nothing);
     RUN_TEST(test_modifier_from_the_other_controller);
     RUN_TEST(test_press_waits_while_eeprom_is_mid_write);
+    RUN_TEST(test_deferred_press_is_dropped_if_the_controller_drops);
+    RUN_TEST(test_deferred_press_is_dropped_when_stale);
+    RUN_TEST(test_pump_keeps_the_uart_drained_while_a_reply_waits);
     RUN_TEST(test_pump_reads_requests_through_noise);
     RUN_TEST(test_pump_work_per_pass_is_bounded);
     RUN_TEST(test_announce_timing_and_format);

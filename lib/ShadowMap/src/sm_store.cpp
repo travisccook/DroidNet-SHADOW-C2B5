@@ -35,6 +35,15 @@ bool isKeyChar(char c) {
 
 bool isCommandChar(char c) { return c >= 0x21 && c <= 0x7E && c != '^'; }
 
+// ";T" / ";t" anywhere makes the WCB treat the whole line as a timer command.
+bool hasTimerToken(const char *s) {
+    for (; s[0] != '\0' && s[1] != '\0'; ++s) {
+        if (s[0] == ';' && (s[1] == 'T' || s[1] == 't'))
+            return true;
+    }
+    return false;
+}
+
 // A NUL-terminated field of `width` bytes: text of at most width-1 characters, then NULs.
 bool fieldTerminated(const uint8_t *field, uint8_t width) {
     bool ended = false;
@@ -104,7 +113,7 @@ bool isValidKey(const char *key) {
 
 bool isValidPrefix(const char *prefix) {
     const size_t n = strlen(prefix);
-    if (n == 0 || n > kPrefixMax || prefix[0] != ';' || prefix[n - 1] == ';')
+    if (n == 0 || n > kPrefixMax || prefix[0] != ';' || prefix[n - 1] == ';' || hasTimerToken(prefix))
         return false;
     for (size_t i = 0; i < n; ++i) {
         if (!isCommandChar(prefix[i]))
@@ -115,7 +124,7 @@ bool isValidPrefix(const char *prefix) {
 
 bool isValidSuffix(const char *suffix) {
     const size_t n = strlen(suffix);
-    if (n > kSuffixMax)
+    if (n > kSuffixMax || hasTimerToken(suffix))
         return false;
     for (size_t i = 0; i < n; ++i) {
         if (!isCommandChar(suffix[i]))

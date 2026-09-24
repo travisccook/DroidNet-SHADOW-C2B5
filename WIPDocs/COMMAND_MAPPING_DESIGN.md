@@ -56,8 +56,9 @@ WCB references are to `travisccook/Wireless_Communication_Board-WCB` `main` at `
    must start with `;`. The one exception is `@WDP1 ...`, which the WCB captures first
    (`WCB.ino:7015`).
 2. **No `^`, and no `;T` / `;t`, in anything SHADOW sends.** The WCB splits on `^` and treats
-   `;T`/`;t` as timer commands. Keys are `[A-Za-z0-9_]`. The prefix can't end in `;`. Prefix and
-   suffix travel hex-encoded. The line checksum is ` *<crc>`, not `^?CHK`.
+   `;T`/`;t` as timer commands. Keys are `[A-Za-z0-9_]`. The prefix and suffix are refused if
+   they contain either sequence, and the prefix can't end in `;`. Prefix and suffix travel
+   hex-encoded. The line checksum is ` *<crc>`, not `^?CHK`.
 3. **SHADOW's port hears every mesh broadcast.** The line reader drops anything that doesn't
    start with `@SM ` without buffering it. `?BCAST,OUT,S<x>,OFF` on SHADOW's port cuts the
    traffic, since SHADOW doesn't need it.
@@ -81,8 +82,9 @@ The mapping is a fixed grid: `index = controller*36 + modifier*6 + button`, whic
 - **The layer.** The highest-priority held modifier picks the layer: `L1, L2, PS, CIRCLE,
   CROSS`, then no modifier. CROSS, CIRCLE and PS also count when they're held on the other
   controller, if it's connected. L1 and L2 only count on the same controller.
-- **The slot.** The first held primary in the order `UP, LEFT, RIGHT, DOWN, PS, L3` picks the
-  slot within the layer.
+- **The slot.** The first held primary in the order `UP, LEFT, RIGHT, DOWN`, then `PS` and `L3`,
+  picks the slot within the layer. The L1 layer checks L3 before PS and every other layer PS
+  before L3, as the old tables' row order did.
 - **No fall-through.** An unmapped slot does nothing; it doesn't fall back to another layer.
   That's how the old `UNUSED` table rows behaved.
 - **Repeat timing.** A combo fires when pressed and again every second while it's held. Taps
@@ -90,11 +92,8 @@ The mapping is a fixed grid: `index = controller*36 + modifier*6 + button`, whic
   controller is checked first. This is unchanged from before.
 
 A test replays every button combination (32,128 states) through the old table code and the new
-resolver. The results are identical except in two cases:
-
-- **Volume and brightness:** removed on purpose.
-- **Dome L1 + L3 + PS held together:** the old table checked L3 before PS in its L1 block but PS
-  before L3 in its L2 block. It is now PS before L3 everywhere.
+resolver. The results are identical except volume and brightness, which were removed on
+purpose.
 
 **Reserved slots** are hardcoded in `main.cpp` or never reach the mapping. They can't be
 mapped, and `SLOT` lines say why:
@@ -167,8 +166,8 @@ digits. SHADOW accepts upper or lower case and sends upper case.
 | `DUMP` | 72 `SLOT` lines in slot order, then `END DUMP 72`. About 4.2 s at 9600 baud. |
 | `SUM` | `SUM <8 hex> slots=72`: the CRC32 over, for each slot in order, its `SLOT` line text after `@SM SLOT ` plus `\n`. The Pi can compute the same over a cached DUMP and skip the DUMP when they match. About 0.2 s. |
 | `DEFAULTS` | `OK DEFAULTS gen=<g>`. Every slot is back on its built-in default. |
-| `PREFIX <hex>` | `OK PREFIX <hex>`. The prefix must start with `;`, can't end with `;`, is at most 11 printable characters and has no `^`. |
-| `SUFFIX <hex\|->` | `OK SUFFIX <hex\|->`. At most 7 printable characters, no `^`. |
+| `PREFIX <hex>` | `OK PREFIX <hex>`. The prefix must start with `;`, can't end with `;`, is at most 11 printable characters, and has no `^` and no `;T`/`;t`. |
+| `SUFFIX <hex\|->` | `OK SUFFIX <hex\|->`. At most 7 printable characters, no `^`, no `;T`/`;t`. |
 | `EVENTS <0\|1>` | `OK EVENTS <0\|1>`. With 1, this port gets the events below. |
 
 ### Events
@@ -200,6 +199,9 @@ The format is `ERR <code> [<VERB> [<slot>]]`.
 
 - **One request at a time.** Wait for its reply, or time out after about 1 s, before sending the
   next. Everything is idempotent, so resend on silence, `ERR crc` or `ERR busy`.
+- **After repeated silence, send HELLO again.** SHADOW keeps the reply route and the EVENTS
+  subscription in RAM, so after a reboot its replies go to its own WCB until it hears HELLO.
+  `shadowmap.Client` does this, and restores EVENTS.
 - **Ignore everything that isn't a CRC-valid line starting with `@SM `.** That includes events
   when you aren't expecting them.
 
@@ -238,24 +240,30 @@ The library has no Arduino dependency, so it builds and tests on the host.
   ATmega2560 at 16 MHz:
   - handling a request: 0.59 ms
   - a pass during a SET: 0.52 ms
-  - a pass during a DUMP: 0.78 ms
+  - a pass during a DUMP: 0.90 ms
   - a button press: 0.20 ms
 
   A test fails if any of these reach 1 ms. Motor updates run every 25 ms. Nothing in the mapping
-  waits: a lookup that would have to wait on an EEPROM write is deferred one pass instead.
+  waits:
+  - A lookup that would have to wait on an EEPROM write is deferred to the next pass. That
+    press is dropped if its controller has gone, or if it's more than 250 ms old.
+  - A request that can't be answered yet stays queued, and bytes arriving meanwhile are read
+    and dropped so Serial1's 64-byte RX buffer can't overflow.
+  - USB replies wait until the debug output is nearly empty, so `printOutput()` never writes
+    more than about 128 bytes for them.
 - **Round trips on SHADOW's side,** from the simulator, 9600 baud: GET about 75 ms, SET about
   120 ms (250 ms for the first write, which formats the EEPROM), SUM about 185 ms, DUMP about
   4.2 s. The inbound leg adds about 1 ms per character.
 - **Memory:**
-  - Static SRAM is 2688 bytes, down from 3801 before this change (the tables, descriptions and
+  - Static SRAM is 2712 bytes, down from 3801 before this change (the tables, descriptions and
     switch strings are gone).
-  - Flash is 49,118 of 253,952 bytes.
+  - Flash is 49,306 of 253,952 bytes.
 
 ## Testing
 
 ```bash
-pio test -e native                        # host: 75 tests (+2 AVR-only, skipped)
-pio test -e simavr --without-uploading    # emulated ATmega2560: all 77
+pio test -e native                        # host: 80 tests (+2 AVR-only, skipped)
+pio test -e simavr --without-uploading    # emulated ATmega2560: all 82
 python3 -m unittest tools/shadowmap/test_shadowmap.py   # reference client vs. the firmware logic
 ```
 

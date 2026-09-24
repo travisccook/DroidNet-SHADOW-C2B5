@@ -28,6 +28,7 @@ class Runtime {
     static constexpr uint32_t kFirstAnnounceMs = 5000;
     static constexpr uint32_t kAnnounceEveryMs = 30000;
     static constexpr uint8_t kMaxBytesPerPass = 64;
+    static constexpr uint32_t kDeferMaxMs = 250;  // a deferred press older than this is dropped
 
     // `announceFw` enables the WCB device announce ("@WDP1 {...}") with that firmware
     // version; nullptr turns it off.
@@ -40,18 +41,25 @@ class Runtime {
     // fired this pass.
     bool buttons(uint32_t nowMs, const PadState &foot, const PadState &dome, FiredPress *fired);
 
-    // Reads @SM requests from `port` without blocking. A request that can't be answered yet
-    // stays in `reader` for the next pass.
+    // Reads @SM requests from `port` without blocking, at most kMaxBytesPerPass bytes a pass.
+    // A request that can't be answered yet (reply queue full, EEPROM busy) stays in `reader`
+    // for the next pass; bytes arriving meanwhile are read and dropped so the UART's RX buffer
+    // can't overflow. The Pi sends one request at a time and resends after a timeout.
     template <class Serial>
     void pump(Serial &port, LineReader &reader, ReplyPort &replies) {
-        for (uint8_t i = 0; i < kMaxBytesPerPass; ++i) {
+        uint8_t budget = kMaxBytesPerPass;
+        while (budget > 0) {
             if (reader.ready()) {
-                if (!protocol_.handleLine(reader.line(), replies))
+                if (!protocol_.handleLine(reader.line(), replies)) {
+                    for (; budget > 0 && port.available() > 0; --budget)
+                        reader.discard(static_cast<char>(port.read()));
                     return;
+                }
                 reader.consume();
             }
             if (port.available() <= 0)
                 return;
+            --budget;
             reader.feed(static_cast<char>(port.read()));
         }
     }
@@ -80,6 +88,7 @@ class Runtime {
     uint16_t repeatCount_ = 0;
     uint8_t deferredSlot_ = kNoSlot;  // pressed while the EEPROM was mid-write
     bool deferredFromOther_ = false;
+    uint32_t deferredAt_ = 0;
     uint32_t nextAnnounce_ = kFirstAnnounceMs;
 };
 

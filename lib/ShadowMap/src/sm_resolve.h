@@ -33,9 +33,10 @@ bool gateOpen(uint16_t held);
 
 // The slot for the held combo, or kNoSlot. The highest-priority held modifier picks the
 // layer (L1, L2, PS, CIRCLE, CROSS, then none) and the first held primary in that layer
-// (UP, LEFT, RIGHT, DOWN, PS, L3) picks the slot. An unmapped slot does not fall through
-// to another layer. CROSS, CIRCLE and PS count as held when they are held on the other
-// controller, if it is connected.
-uint8_t resolveSlot(Ctrl ctrl, const PadState &self, const PadState &other);
+// (UP, LEFT, RIGHT, DOWN, then PS and L3; L3 before PS in the L1 layer) picks the slot. An
+// unmapped slot does not fall through to another layer. CROSS, CIRCLE and PS count as held
+// when they are held on the other controller, if it is connected; `modFromOther` (optional)
+// says whether that's where the deciding modifier came from.
+uint8_t resolveSlot(Ctrl ctrl, const PadState &self, const PadState &other, bool *modFromOther = nullptr);
 
 }  // namespace sm

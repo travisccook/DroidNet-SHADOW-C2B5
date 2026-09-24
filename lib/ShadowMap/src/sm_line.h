@@ -20,11 +20,17 @@ class LineReader {
     uint8_t length() const { return len_; }
     void consume();
 
+    // While a ready line waits to be handled, bytes that keep arriving are thrown away with
+    // this, so the UART's small RX buffer can't overflow (and merge lines). If that stops
+    // mid-line, the reader skips to the next line end after consume().
+    void discard(char c) { resync_ = !(c == '\r' || c == '\n'); }
+
   private:
     enum class State : uint8_t { Collect, Skip, Ready };
     char buf_[kMaxLen + 1] = {};
     uint8_t len_ = 0;
     State state_ = State::Collect;
+    bool resync_ = false;
 };
 
 }  // namespace sm

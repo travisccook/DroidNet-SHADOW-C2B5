@@ -54,6 +54,7 @@ class WcbEmulator(smc.Transport):
         self.commands: List[str] = []  # what the WCB would run for SHADOW
         self.announces: List[str] = []
         self.violations: List[str] = []
+        self.lost: List[str] = []  # replies that went to a USB port the Pi isn't on
         self.to_shadow: List[str] = []
         self.corrupt_next_request = False
         self.drop_next_reply = False
@@ -89,12 +90,12 @@ class WcbEmulator(smc.Transport):
             if self.shadow_wcb is None:
                 payload = line[3:]
             else:
-                self.violations.append(f"reply to SHADOW's own USB, not the Pi's WCB: {line}")
+                self.lost.append(line)  # SHADOW's own WCB's USB: the Pi never sees it
                 return
         m = re.match(r"^;W(\d),?;S0(.*)$", line) or re.match(r"^;W(\d{2}),;S0(.*)$", line)
         if m:
             if int(m.group(1)) != self.pi_wcb:
-                self.violations.append(f"reply routed to WCB{m.group(1)}, the Pi is on WCB{self.pi_wcb}")
+                self.lost.append(line)
                 return
             payload = m.group(2)
         if payload is None:
@@ -312,6 +313,28 @@ class RemoteRouteTest(unittest.TestCase):
             self.assertEqual("scanning", client.get(smc.Slot.parse("F NONE L3")).key)
             wcb.press(foot=L3)
             self.assertEqual(";W1;Cscanning", wcb.commands[-1])
+            self.assertEqual([], wcb.violations)
+        finally:
+            wcb.close()
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_client_recovers_after_shadow_reboots(self):
+        """A reboot resets SHADOW's reply route to its own WCB; the client says HELLO again."""
+        tmp = tempfile.mkdtemp(prefix="shadow_eeprom_")
+        wcb = WcbEmulator(os.path.join(tmp, "e.bin"), shadow_port=5, shadow_wcb=2, pi_wcb=4)
+        try:
+            client = smc.Client(wcb, smc.WcbRoute(shadow_port=5, shadow_wcb=2, pi_wcb=4), timeout=0.05)
+            client.hello()
+            events = []
+            client.on_event = events.append
+            client.events(True)
+            client.set(smc.Slot.parse("D NONE L3"), "yes")
+            wcb.reboot()
+            self.assertEqual("yes", client.get(smc.Slot.parse("D NONE L3")).key)
+            self.assertTrue(wcb.lost, "replies right after the reboot should have gone astray")
+            wcb.press(dome=L3)  # EVENTS came back with the new HELLO
+            client.listen(0.01)
+            self.assertEqual(["yes"], [e.key for e in events if e.kind == "PRESS"])
             self.assertEqual([], wcb.violations)
         finally:
             wcb.close()

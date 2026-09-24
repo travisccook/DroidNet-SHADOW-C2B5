@@ -74,6 +74,29 @@ static void test_ready_line_is_held_until_consumed() {
     TEST_ASSERT_FALSE(r.ready());
 }
 
+static void test_discard_while_pending_resyncs_to_the_next_line() {
+    LineReader r;
+    const char *first = "@SM ONE\r";
+    for (const char *p = first; *p != '\0'; ++p)
+        r.feed(*p);
+    TEST_ASSERT_TRUE(r.ready());
+    // Stop discarding mid-line: the tail of that line must not become a line of its own.
+    for (const char *p = "@SM TW"; *p != '\0'; ++p)
+        r.discard(*p);
+    r.consume();
+    char line[LineReader::kMaxLen + 1] = {};
+    TEST_ASSERT_EQUAL_UINT8(1, feedAll(r, "O\r@SM THREE\r", line));
+    TEST_ASSERT_EQUAL_STRING("@SM THREE", line);
+    // Stop discarding right after a line end: the next line is read normally.
+    for (const char *p = first; *p != '\0'; ++p)
+        r.feed(*p);
+    for (const char *p = "noise\r"; *p != '\0'; ++p)
+        r.discard(*p);
+    r.consume();
+    TEST_ASSERT_EQUAL_UINT8(1, feedAll(r, "@SM FOUR\r", line));
+    TEST_ASSERT_EQUAL_STRING("@SM FOUR", line);
+}
+
 static void test_queue_is_all_or_nothing() {
     TxQueue q;
     char big[TxQueue::kCapacity + 1];
@@ -140,6 +163,7 @@ int runAllTests() {
     RUN_TEST(test_reader_keeps_only_sm_lines);
     RUN_TEST(test_reader_drops_noise_and_long_lines);
     RUN_TEST(test_ready_line_is_held_until_consumed);
+    RUN_TEST(test_discard_while_pending_resyncs_to_the_next_line);
     RUN_TEST(test_queue_is_all_or_nothing);
     RUN_TEST(test_queue_wraps_and_drains_at_uart_speed);
     RUN_TEST(test_command_headroom_fits_the_longest_command);

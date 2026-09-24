@@ -1,10 +1,7 @@
 // Replays every button combination through the old table-driven code (frozen in
 // legacy_tables.h) and through the new resolver + built-in defaults, and checks that both
-// send the same bytes to the WCB. Two differences are expected and counted:
-//   - volume and brightness (PS + direction) were removed on purpose: now nothing is sent
-//   - dome L1 + L3 + PS held together: the old table checked L3 before PS in the L1 block
-//     (Front Holo Center) but PS before L3 in the L2 block; the new rule is PS before L3
-//     everywhere, so this one combo now resolves to the unmapped dome L1 + PS slot
+// send the same bytes to the WCB. The only expected difference is volume and brightness
+// (PS + direction), removed on purpose: now nothing is sent for them.
 #include <unity.h>
 
 #include <ShadowMap.h>
@@ -59,7 +56,7 @@ static void test_new_mapping_matches_old_for_every_combo() {
     store.begin();
 
     const uint16_t crossBits[] = {kHeldCross, kHeldCircle, kHeldPs};
-    uint32_t compared = 0, same = 0, removed = 0, knownDiff = 0;
+    uint32_t compared = 0, same = 0, removed = 0;
     char newSent[40];
     char msg[120];
 
@@ -100,26 +97,17 @@ static void test_new_mapping_matches_old_for_every_combo() {
                     ++same;
                     continue;
                 }
-                const bool knownL3PsOrder = ctrl == Ctrl::D && (held & kHeldL1) && (held & kHeldL3) &&
-                                            (held & kHeldPs) && strcmp(old, ";W1;Cfrontholocenter\r") == 0 &&
-                                            newSent[0] == '\0';
-                if (knownL3PsOrder) {
-                    ++knownDiff;
-                    continue;
-                }
                 describe(msg, sizeof(msg), ctrl, held, other);
                 TEST_FAIL_MESSAGE(msg);
             }
         }
     }
     char summary[100];
-    snprintf(summary, sizeof(summary), "compared=%lu same=%lu removed=%lu knownDiff=%lu",
-             static_cast<unsigned long>(compared), static_cast<unsigned long>(same),
-             static_cast<unsigned long>(removed), static_cast<unsigned long>(knownDiff));
+    snprintf(summary, sizeof(summary), "compared=%lu same=%lu removed=%lu", static_cast<unsigned long>(compared),
+             static_cast<unsigned long>(same), static_cast<unsigned long>(removed));
     TEST_MESSAGE(summary);
     TEST_ASSERT_TRUE(removed > 0);
-    TEST_ASSERT_TRUE(knownDiff > 0);
-    TEST_ASSERT_EQUAL_UINT32(compared, same + removed + knownDiff);
+    TEST_ASSERT_EQUAL_UINT32(compared, same + removed);
 }
 
 int runAllTests() {

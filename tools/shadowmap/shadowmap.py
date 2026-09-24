@@ -268,6 +268,7 @@ class Client:
     retries: int = 3
     on_event: Optional[Callable[[Event], None]] = None
     stats: Dict[str, int] = field(default_factory=lambda: {"sent": 0, "retries": 0, "bad_crc": 0})
+    _events_on: bool = False
 
     # -- plumbing --------------------------------------------------------------------
 
@@ -304,7 +305,22 @@ class Client:
     def request(self, body: str, accept: Callable[[str], bool], expect_lines: int = 1) -> List[str]:
         """Sends `body` and returns the reply lines `accept` matches. Retries on silence and on
         '@SM ERR crc' / 'busy'. Raises ProtocolError on any other @SM ERR aimed at this
-        request."""
+        request.
+
+        If SHADOW stays silent, it may have rebooted: it keeps the reply route and the EVENTS
+        subscription in RAM, so after a reboot its replies can go to the wrong WCB. In that
+        case this says HELLO again (restoring EVENTS if they were on) and tries once more."""
+        try:
+            return self._request(body, accept, expect_lines)
+        except Timeout:
+            if body.startswith("@SM HELLO"):
+                raise
+            self.hello()
+            if self._events_on:
+                self.events(True)
+            return self._request(body, accept, expect_lines)
+
+    def _request(self, body: str, accept: Callable[[str], bool], expect_lines: int) -> List[str]:
         verb = body.split(" ")[1]
         last_err = None
         for attempt in range(self.retries + 1):
@@ -319,6 +335,8 @@ class Client:
                     code = parts[2]
                     if code in ("crc", "busy"):
                         last_err = ProtocolError(code, reply)
+                        if code == "busy":
+                            time.sleep(0.05 * (attempt + 1))
                         break  # retry
                     if len(parts) < 4 or parts[3] == verb:
                         raise ProtocolError(code, reply)
@@ -394,6 +412,7 @@ class Client:
     def events(self, on: bool) -> None:
         want = f"@SM OK EVENTS {1 if on else 0}"
         self.request(f"@SM EVENTS {1 if on else 0}", lambda r: r == want)
+        self._events_on = on
 
     def listen(self, seconds: float) -> None:
         """Pumps incoming lines for a while so on_event sees presses and controller changes."""
