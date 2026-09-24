@@ -9,7 +9,7 @@ Claims below are marked **VERIFIED** (with how) or **ASSUMED**. Re-check anythin
 
 ---
 
-## 0. Status, 2026-09-24 afternoon (the second SHADOW-C2B5 session)
+## 0. Status at the end of 2026-09-24 (the second SHADOW-C2B5 session)
 
 Section 4 is partly done. Results are on
 [PR #1](https://github.com/travisccook/SHADOW-C2B5/pull/1#issuecomment-5817847387).
@@ -39,10 +39,40 @@ replaces the branch/PR advice in sections 2, 4 and 7.
   leading noise bytes are now ignored. Confirmed on the droid: after DroidNet 2.3.6's deploy reset WCB 1
   (listener reopened at 17:16:54Z), the first `;S2@SM HELLO` was answered on the first attempt, in 98 ms.
 
-**Still to do** (the controllers were away):
+**Next session: the controller checks.** Everything else is done. The owner has the controllers back on 2026-09-25.
+Work through this in order; the owner does the physical parts, and you run everything else yourself.
 
-- section 4 step 5 (driving), step 6 (real presses, including foot CIRCLE+LEFT `alarm` and foot RIGHT `sadsound`)
-  and step 9 (editing while driving)
+1. **Set up.**
+   - Build the SSH known-hosts file (see "Reaching c2-body" below). Check that SHADOW answers: `HELLO` shows
+     `fw=af4db5d`, and `SUM` is `65096899`.
+   - Ask the DroidNet session (in DroidNetSignalBooster; use `ListAgents`) whether it wants to run its own controller
+     checks in the same sitting. Those are live PRESS/CTL events in the SHADOW tab, Find by pressing, press-to-verify
+     a remap, and Test (its handoff's "Status" lists them). Only one of you sends `@SM` at a time.
+2. **Pair both controllers** (PS button). `HELLO` should then show `pads=FD`.
+3. **Presses, motors still disconnected.** Send `EVENTS 1`. Have the owner press each combo, and read the PRESS
+   lines from `/api/serial/history`:
+
+   | Press | Expect a PRESS line for | On the droid |
+   | --- | --- | --- |
+   | foot L1+UP | `F L1 UP extremehappysou default` | HCR extreme happy |
+   | dome L3+L1 | `D L1 L3 frontholocenter default` | front holo centers; **no** over-speed toggle |
+   | foot L3+L1 | never a PRESS (reserved) | debug log: over-speed toggles |
+   | foot/dome PS+UP | `F PS UP - default` / `D PS UP - default` | nothing |
+   | foot RIGHT | `F NONE RIGHT sadsound default` | HCR mild sad (**never tested**) |
+   | foot CIRCLE+LEFT | `F CIRCLE LEFT alarm default` | Death Star klaxon plus a **120 s** red Flthy pulse (**never tested**) |
+
+   Then do one remap end to end: `SET F NONE L3 scanning`, press foot L3 alone (the probe-droid scan should play),
+   then `REVERT F NONE L3`. Send `EVENTS 0` when done.
+4. **Driving** (section 4 steps 5 and 9). Motor power back on, wheels up first.
+   - Foot drive and dome.
+   - PS+✕ / PS+○ disable and enable the stick.
+   - Foot L3+L1 toggles over-speed.
+   - Then drive while running repeated `DUMP`s (`--wait 7 DUMP`). Driving must feel exactly as before.
+5. **Finish.**
+   - SHADOW back on defaults: `SUM 65096899`, and `EVENTS 0`.
+   - Post the results on PR #1.
+   - Update this section.
+   - Tell the DroidNet session.
 
 State left on the droid: EEPROM formatted, gen 1, all slots on their defaults (SUM `65096899`), EVENTS off.
 
@@ -68,8 +98,17 @@ SHADOW; routed `;S2...` lines still do. It's in WCB 1's NVS, and the hourly back
   `DroidNetSignalBooster/images/droidnet-lite-zero2-w-debug-20260914-223145.img`, so every Pi flashed from that image
   shares it. Verify against the image; don't turn host-key checking off.
 - **Login:** root, with the DroidNet project's standard password (see DroidNetSignalBooster's docs).
+- **Verified known-hosts file.** Build it from the image, then pass `-o StrictHostKeyChecking=yes -o
+  UserKnownHostsFile=<file>` to ssh/scp. `~/.ssh/known_hosts` still has the stale `neC/...` key.
+  ```
+  LC_ALL=C grep -a -o -E '(ssh-ed25519|ecdsa-sha2-nistp256|ssh-rsa) AAAA[A-Za-z0-9+/=]+ root@76bff6100e8b' \
+    ~/Repos/DroidNetSignalBooster/images/droidnet-lite-zero2-w-debug-20260914-223145.img | sort -u \
+    | awk '{print "c2-body.local,192.168.86.237", $1, $2}' > <file>
+  ssh-keygen -lf <file>    # the ED25519 line must be SHA256:fLk1...
+  ```
 - **Refused logins:** logins are sometimes refused. Retry only when the failure is "Permission denied".
-- **Sending `@SM` without stopping DroidNet's listener:**
+- **Sending `@SM` without stopping DroidNet's listener:** `tools/shadowmap/sm_via_api.py` does this. Its header
+  shows how to run it over ssh. By hand:
   1. `POST http://localhost/api/wcb/command` with `{"port":"/dev/ttyUSB0","command":";S2@SM ... *<crc>","timeout":0.5}`.
      It always reports a timeout.
   2. Read the reply from `GET /api/serial/history?port=/dev/ttyUSB0`.
@@ -82,8 +121,9 @@ SHADOW; routed `;S2...` lines still do. It's in WCB 1's NVS, and the hourly back
   - `sadsound` from `C2B5/WIPDocs/NEWSERIAL.md`
   - the old HCR codes converted to `;H,...`, following the conversion WCB 1's other commands went through
 - **Hourly backup.** DroidNet runs a WCB 1 `?BACKUP` every hour, at about :46 on 2026-09-24 (it's timed from boot).
-  Its parser on c2-body takes the line after each "For Configured Boards" header as the restore line. So keep EVENTS
-  off across it until DroidNet ships its fix.
+  Its old parser took the line after each "For Configured Boards" header as the restore line, so an `@SM` event
+  landing there broke that hour's backup. DroidNet 2.3.6, on c2-body since 2026-09-24, skips `@SM` lines, so
+  EVENTS is safe across a backup now.
 
 ## 1. What you own
 
