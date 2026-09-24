@@ -138,7 +138,8 @@ test against the real droid. Then ask the user whether to merge the PR.
 ## 6. Working with the DroidNet session
 
 The DroidNet session builds the Pi side: a backend (`ShadowLink`) on DroidNet's existing WCB listener, HTTP/SSE
-endpoints, and the SHADOW tab. Its docs, on DroidNetSignalBooster `main`:
+endpoints, and the SHADOW tab. Its docs were merged to DroidNetSignalBooster `main` in
+[PR #8](https://github.com/travisccook/DroidNetSignalBooster/pull/8) (`42fad93`):
 
 - `docs/superpowers/specs/2026-09-24-shadow-button-map-design.md`: backend design
 - `docs/superpowers/specs/2026-09-24-shadow-button-map-ui-design.md` plus `shadow-button-map-ui/`: UI and
@@ -150,8 +151,8 @@ endpoints, and the SHADOW tab. Its docs, on DroidNetSignalBooster `main`:
 1. **Directly.** Both sessions run on the user's machine. Use `ListAgents` to find the other local session (it's
    working in DroidNetSignalBooster) and `SendMessage` to reach it. Introduce yourself when you start, with your
    branch and head commit. If your build doesn't have these tools, use 2.
-2. **In writing.** Comment on the other repo's PR. This is the durable record for decisions and protocol changes.
-   Post the link to the SHADOW PR where the DroidNet session can see it.
+2. **In writing.** Comment on the other repo's PR: this one is SHADOW-C2B5 #1, and the DroidNet session will open
+   its own implementation PR and post the link on #1. This is the durable record for decisions and protocol changes.
 3. **Through the user,** for decisions that are theirs (merging, hardware, product questions).
 
 **Contract rules:**
