@@ -1,0 +1,235 @@
+// Test doubles shared by the ShadowMap tests. No STL, so they also run on the emulated
+// ATmega2560 (8 KB of SRAM: keep buffers small).
+#pragma once
+
+#include <ShadowMap.h>
+#include <stdio.h>
+#include <string.h>
+
+// EEPROM that behaves like the ATmega2560's: each write keeps it busy for `writeTicks`
+// calls to tick(). Touching it while busy counts as a violation (the store must never do
+// that). `budget` simulates a power cut: once it reaches zero, writes stop landing, and
+// with `cutGarbage` the last write lands as garbage, like a write cut off by a brown-out.
+class FakeEeprom final : public sm::EepromIo {
+  public:
+    static constexpr uint16_t kSize = sm::MapStore::kFootprint;
+
+    FakeEeprom() { memset(mem, 0xFF, sizeof(mem)); }
+
+    bool ready() override { return busy == 0; }
+    uint8_t read(uint16_t addr) override {
+        if (busy != 0 || addr >= kSize) {
+            ++violations;
+            return 0xFF;
+        }
+        ++reads;
+        uint8_t v = mem[addr];
+        if (static_cast<int32_t>(addr) == stuckAddr)
+            v ^= 0x01;
+        return v;
+    }
+    void write(uint16_t addr, uint8_t value) override {
+        if (busy != 0 || addr >= kSize) {
+            ++violations;
+            return;
+        }
+        ++writes;
+        if (budget == 0)
+            return;  // no power: nothing lands
+        if (budget > 0) {
+            --budget;
+            if (budget == 0 && cutGarbage) {
+                mem[addr] = static_cast<uint8_t>(value ^ 0xA5);
+                return;
+            }
+        }
+        mem[addr] = value;
+        busy = writeTicks;
+    }
+    void tick() {
+        if (busy != 0)
+            --busy;
+    }
+    // Power comes back: the EEPROM is idle and writes land again.
+    void powerOn() {
+        busy = 0;
+        budget = -1;
+    }
+
+    uint8_t mem[kSize];
+    uint8_t busy = 0;
+    uint8_t writeTicks = 3;
+    int32_t budget = -1;  // writes left before the power cut; -1 = no cut
+    bool cutGarbage = false;
+    int32_t stuckAddr = -1;  // reads of this address come back with bit 0 flipped
+    uint32_t writes = 0;
+    uint32_t reads = 0;
+    uint32_t violations = 0;
+};
+
+// Remembers the last few lines seen.
+class LineLog {
+  public:
+    static constexpr uint8_t kLines = 4;
+    static constexpr uint8_t kWidth = 96;
+
+    void add(const char *line, size_t len) {
+        char *dst = lines_[next_];
+        const size_t n = len < kWidth - 1 ? len : kWidth - 1;
+        memcpy(dst, line, n);
+        dst[n] = '\0';
+        next_ = static_cast<uint8_t>((next_ + 1) % kLines);
+        ++count;
+    }
+    // back = 0 is the most recent line.
+    const char *last(uint8_t back = 0) const {
+        if (back >= count || back >= kLines)
+            return "";
+        return lines_[(next_ + kLines - 1 - back) % kLines];
+    }
+    void clear() {
+        count = 0;
+        next_ = 0;
+    }
+
+    uint32_t count = 0;
+
+  private:
+    char lines_[kLines][kWidth] = {};
+    uint8_t next_ = 0;
+};
+
+// Plays the part of SHADOW's WCB: takes what SHADOW writes to Serial1, checks it against
+// the WCB's rules, and sorts it into what the Pi would see on the WCB's USB port (";S0"
+// replies, route stripped) and commands the WCB would run.
+class WcbSim {
+  public:
+    // HardwareSerial surface used by TxQueue::drain.
+    // Like HardwareSerial: room shrinks as bytes are queued; refill() models the UART
+    // sending them.
+    int availableForWrite() { return room; }
+    size_t write(const uint8_t *data, size_t n) {
+        if (static_cast<int>(n) > room)
+            ++overruns;
+        room -= static_cast<int>(n);
+        for (size_t i = 0; i < n; ++i)
+            byte(static_cast<char>(data[i]));
+        return n;
+    }
+    void refill(int bytes = 63) {
+        room += bytes;
+        if (room > 63)
+            room = 63;
+    }
+
+    void byte(char c) {
+        if (c == '\r') {
+            buf_[len_] = '\0';
+            line(buf_, len_);
+            len_ = 0;
+            return;
+        }
+        if (len_ < sizeof(buf_) - 1)
+            buf_[len_++] = c;
+        else
+            ++overlong;
+    }
+
+    int room = 63;  // HardwareSerial's TX buffer when empty
+    LineLog usb;       // replies as the Pi sees them
+    LineLog commands;  // everything else the WCB would act on
+    LineLog announces;
+    uint32_t violations = 0;  // bare lines, '^', ";T", stray line feeds
+    uint32_t overruns = 0;
+    uint32_t overlong = 0;
+    uint8_t lastRoute = 0xFF;
+
+  private:
+    void line(const char *s, size_t n) {
+        if (strchr(s, '^') != nullptr || strchr(s, '\n') != nullptr)
+            ++violations;
+        if (strncmp(s, "@WDP", 4) == 0) {
+            announces.add(s, n);
+            return;
+        }
+        if (s[0] != ';') {
+            ++violations;  // a bare line would be broadcast to every board
+            return;
+        }
+        if (strstr(s, ";T") != nullptr || strstr(s, ";t") != nullptr)
+            ++violations;  // the WCB would treat it as a timer command
+        if (strncmp(s, ";S0", 3) == 0) {
+            lastRoute = 0;
+            usb.add(s + 3, n - 3);
+            return;
+        }
+        if (s[1] == 'W') {
+            // ;W<d>;S0<text> or ;W<dd>,;S0<text>
+            const char *p = s + 2;
+            uint8_t route = 0;
+            while (*p >= '0' && *p <= '9')
+                route = static_cast<uint8_t>(route * 10 + (*p++ - '0'));
+            if (*p == ',')
+                ++p;
+            if (strncmp(p, ";S0", 3) == 0) {
+                lastRoute = route;
+                usb.add(p + 3, strlen(p + 3));
+                return;
+            }
+        }
+        commands.add(s, n);
+    }
+
+    char buf_[128] = {};
+    size_t len_ = 0;
+};
+
+// A reply port that records lines directly (the USB side of SHADOW).
+class CapturePort final : public sm::ReplyPort {
+  public:
+    bool canSend(uint8_t len) override { return open && len <= sm::Protocol::kMaxLine; }
+    void send(const char *line, uint8_t len) override { log.add(line, len); }
+    bool requiresCrc() const override { return crcRequired; }
+
+    bool open = true;
+    bool crcRequired = false;
+    LineLog log;
+};
+
+// "<body> *<CRC32>" into out.
+inline const char *withCrc(const char *body, char *out, size_t cap) {
+    const uint32_t crc = sm::crc32(reinterpret_cast<const uint8_t *>(body), strlen(body));
+    snprintf(out, cap, "%s *%08lX", body, static_cast<unsigned long>(crc));
+    return out;
+}
+
+// Checks a reply's " *<CRC32>" and copies the body (without it) to out. False if missing/bad.
+inline bool stripCrc(const char *line, char *out, size_t cap) {
+    const char *star = strstr(line, " *");
+    if (star == nullptr || strlen(star + 2) != 8)
+        return false;
+    const size_t bodyLen = static_cast<size_t>(star - line);
+    if (bodyLen + 1 > cap)
+        return false;
+    char want[9];
+    snprintf(want, sizeof(want), "%08lX",
+             static_cast<unsigned long>(sm::crc32(reinterpret_cast<const uint8_t *>(line), bodyLen)));
+    if (strcmp(want, star + 2) != 0)
+        return false;
+    memcpy(out, line, bodyLen);
+    out[bodyLen] = '\0';
+    return true;
+}
+
+// Three defaults used by the store and protocol tests.
+extern const sm::DefaultMapping kTestDefaults[] PROGMEM;
+constexpr uint8_t kTestDefaultCount = 3;
+constexpr uint8_t kSlotFootL1Up = sm::slotIndex(sm::Ctrl::F, sm::Mod::L1, sm::Btn::UP);
+constexpr uint8_t kSlotFootNoneDown = sm::slotIndex(sm::Ctrl::F, sm::Mod::NONE, sm::Btn::DOWN);
+constexpr uint8_t kSlotDomeCrossLeft = sm::slotIndex(sm::Ctrl::D, sm::Mod::CROSS, sm::Btn::LEFT);
+constexpr uint8_t kSlotDomeL2Right = sm::slotIndex(sm::Ctrl::D, sm::Mod::L2, sm::Btn::RIGHT);
+
+#define SM_DEFINE_TEST_DEFAULTS                                                                \
+    const sm::DefaultMapping kTestDefaults[] PROGMEM = {                                       \
+        {kSlotFootL1Up, "extremehappysou"}, {kSlotFootNoneDown, "angrysound"}, {kSlotDomeCrossLeft, "scanning"}, \
+    };
