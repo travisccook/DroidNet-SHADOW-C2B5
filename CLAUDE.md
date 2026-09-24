@@ -27,7 +27,8 @@ pio test -e native                       # Host unit tests (lib/WdpAnnounce)
 
 The firmware environment is `SHADOWC2B5`, the default. Each build also copies the firmware to `build/` via
 `scripts/post_build.py`, and `scripts/git_rev.py` defines `GIT_REV` (the short commit SHA, `-dirty` if modified).
-`native` runs host unit tests only; the firmware env ignores all test suites, so `pio test` never uploads to the Mega.
+`native` runs host unit tests only. The firmware env sets `test_ignore = *`, but `pio test --ignore ...` replaces
+that list, so the test file also refuses to compile when `ARDUINO` is defined: no test image can reach the Mega.
 
 ### Updating Control Mapping Documentation
 

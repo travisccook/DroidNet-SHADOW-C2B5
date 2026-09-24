@@ -1,4 +1,12 @@
 // Host tests for wdp::AnnounceTimer. Run: pio test -e native
+//
+// Never build this for the Mega: a test image uploaded over SHADOW leaves the droid without
+// its firmware. [env:SHADOWC2B5] has test_ignore = *, but `pio test --ignore ...` replaces
+// that list, so this guard is what actually stops it.
+#ifdef ARDUINO
+#error "Host-only test: run pio test -e native"
+#endif
+
 #include <unity.h>
 
 #include "../../lib/WdpAnnounce/WdpAnnounce.h"
