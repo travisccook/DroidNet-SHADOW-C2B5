@@ -65,7 +65,8 @@ WCB references are to `travisccook/Wireless_Communication_Board-WCB` `main` at `
    they contain either sequence, and the prefix can't end in `;`. Prefix and suffix travel
    hex-encoded. The line checksum is ` *<crc>`, not `^?CHK`.
 3. **SHADOW's port hears every mesh broadcast.** The line reader drops anything that doesn't
-   start with `@SM ` without buffering it. `?BCAST,OUT,S<x>,OFF` on SHADOW's port cuts the
+   start with `@SM ` without buffering it. Noise bytes before a line starts are ignored, so a glitch on the
+   wire (seen when WCB 1 resets at power-up) can't swallow the next request. `?BCAST,OUT,S<x>,OFF` on SHADOW's port cuts the
    traffic, since SHADOW doesn't need it.
 4. **WCB debug echoes are ignored.** With WCB debug on, the Pi also sees `Sent to USB: @SM ...`
    and similar lines. Clients only act on lines that *start* with `@SM `.

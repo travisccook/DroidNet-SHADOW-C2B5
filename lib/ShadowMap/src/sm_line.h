@@ -1,6 +1,6 @@
 // Non-blocking line assembly for incoming serial bytes. Only lines starting with "@SM " are
 // kept; everything else (WCB broadcast traffic, debug text) is skipped a byte at a time
-// without buffering it. Lines end at '\r' or '\n'.
+// without buffering it. Lines end at '\r' or '\n'. Noise bytes before a line starts are ignored.
 #pragma once
 
 #include <stdint.h>

@@ -22,6 +22,20 @@ uint8_t feedAll(LineReader &reader, const char *s, char *lastLine = nullptr) {
     return ready;
 }
 
+// Same, for bytes that may include '\0'.
+uint8_t feedBytes(LineReader &reader, const char *s, size_t n, char *lastLine = nullptr) {
+    uint8_t ready = 0;
+    for (size_t i = 0; i < n; ++i) {
+        if (reader.feed(s[i])) {
+            ++ready;
+            if (lastLine != nullptr)
+                strcpy(lastLine, reader.line());
+            reader.consume();
+        }
+    }
+    return ready;
+}
+
 }  // namespace
 
 static void test_reader_keeps_only_sm_lines() {
@@ -56,6 +70,29 @@ static void test_reader_drops_noise_and_long_lines() {
     // And the reader recovers for the next line.
     TEST_ASSERT_EQUAL_UINT8(1, feedAll(r, "@SM OK\r", line));
     TEST_ASSERT_EQUAL_STRING("@SM OK", line);
+}
+
+// A glitch byte on the wire before a line starts (seen when WCB 1 resets at power-up) must not
+// cost the next request. Noise inside a line, or printable junk before "@SM ", still drops it.
+static void test_reader_ignores_noise_before_a_line_starts() {
+    LineReader r;
+    char line[LineReader::kMaxLen + 1] = {};
+    TEST_ASSERT_EQUAL_UINT8(1, feedAll(r, "\xFF@SM HELLO\r", line));
+    TEST_ASSERT_EQUAL_STRING("@SM HELLO", line);
+    const char nul[] = "\x00@SM A\r";
+    TEST_ASSERT_EQUAL_UINT8(1, feedBytes(r, nul, sizeof(nul) - 1, line));
+    TEST_ASSERT_EQUAL_STRING("@SM A", line);
+    const char several[] = "\xF0\x00\x80\x1B@SM B\r";
+    TEST_ASSERT_EQUAL_UINT8(1, feedBytes(r, several, sizeof(several) - 1, line));
+    TEST_ASSERT_EQUAL_STRING("@SM B", line);
+    // Still dropped: printable junk first, noise after the line has started, noise after junk.
+    TEST_ASSERT_EQUAL_UINT8(0, feedAll(r, "x@SM C\r"));
+    TEST_ASSERT_EQUAL_UINT8(0, feedAll(r, "@\xFFSM D\r"));
+    TEST_ASSERT_EQUAL_UINT8(0, feedAll(r, "\xFFx@SM E\r"));
+    TEST_ASSERT_EQUAL_UINT8(0, feedAll(r, "junk\xFF@SM F\r"));
+    // And the next clean line after all of that is kept.
+    TEST_ASSERT_EQUAL_UINT8(1, feedAll(r, "@SM G\r", line));
+    TEST_ASSERT_EQUAL_STRING("@SM G", line);
 }
 
 static void test_ready_line_is_held_until_consumed() {
@@ -162,6 +199,7 @@ int runAllTests() {
     UNITY_BEGIN();
     RUN_TEST(test_reader_keeps_only_sm_lines);
     RUN_TEST(test_reader_drops_noise_and_long_lines);
+    RUN_TEST(test_reader_ignores_noise_before_a_line_starts);
     RUN_TEST(test_ready_line_is_held_until_consumed);
     RUN_TEST(test_discard_while_pending_resyncs_to_the_next_line);
     RUN_TEST(test_queue_is_all_or_nothing);
