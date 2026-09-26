@@ -216,7 +216,9 @@ controller sends. It sends this line to the WCB port by itself, whether or not E
 - **Where it goes on the Pi:** DroidNet (DroidNetSignalBooster branch `claude/magical-pasteur-1rbyte`, not yet
   merged) latches the line whenever its SHADOW feature is on and routed, tab open or not. It shows the level on the
   SHADOW tab's Foot and Dome buttons and publishes it to Comlink as a `shadow` announce object shaped like `sabe`
-  (foot = `drive`, `st` in place of `mv`, `ttl` 90). Comlink doesn't read `shadow` yet.
+  (foot = `drive`, `st` in place of `mv`, `ttl` 90). Comlink (droidnet-comlink branch `claude/magical-pasteur-1rbyte`,
+  not yet merged or built in Xcode) shows it on the Voice tab chip ("FOOT LOW", "CONTROLLERS OK") and the Watch, and
+  alerts once when a controller enters CRIT.
 
 **How the level is decided** (`lib/ShadowMap/src/sm_battery.cpp`):
 
