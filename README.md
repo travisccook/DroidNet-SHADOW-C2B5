@@ -18,6 +18,7 @@ The primary control board for C2-B5, handling PS3 controller input, motor contro
 - **Dual PS3 controller support**: Separate controllers for foot and dome control
 - **Motor ramping**: Smooth acceleration/deceleration for safe driving
 - **Fault detection**: Automatic motor shutdown on controller disconnect or communication loss
+- **Controller battery levels**: each controller's battery (`OK`/`LOW`/`CRIT`) is reported to DroidNet over the WCB link when it changes and every 30 s (`@SM BAT`, see `WIPDocs/COMMAND_MAPPING_DESIGN.md`)
 - **Serial communication**: Commands sent to other boards via serial interfaces
 
 ## Serial Interfaces

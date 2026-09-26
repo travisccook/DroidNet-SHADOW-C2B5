@@ -158,7 +158,7 @@ digits. SHADOW accepts upper or lower case and sends upper case.
 - **Tokens:** separated by single spaces.
 - **Slots:** written as `<C> <M> <B>`, e.g. `F L1 UP`.
 - **One write-type operation at a time.** SET, REVERT, DEFAULTS, PREFIX, SUFFIX, DUMP and SUM are
-  refused with `ERR busy` while another one runs. HELLO, CFG, GET and EVENTS are always answered.
+  refused with `ERR busy` while another one runs. HELLO, CFG, GET, EVENTS and BAT are always answered.
 
 ### Requests
 
@@ -175,6 +175,7 @@ digits. SHADOW accepts upper or lower case and sends upper case.
 | `PREFIX <hex>` | `OK PREFIX <hex>`. The prefix must start with `;`, can't end with `;`, is at most 11 printable characters, and has no `^` and no `;T`/`;t`. |
 | `SUFFIX <hex\|->` | `OK SUFFIX <hex\|->`. At most 7 printable characters, no `^`, no `;T`/`;t`. |
 | `EVENTS <0\|1>` | `OK EVENTS <0\|1>`. With 1, this port gets the events below. |
+| `BAT` | `BAT F=<lvl> D=<lvl> fs=<st> ds=<st> up=<s> hb=<s>`: the controllers' battery levels (see [Battery reports](#battery-reports)). |
 
 ### Events
 
@@ -184,6 +185,59 @@ These are only sent with `EVENTS 1`, and are dropped rather than queued if the l
 | --- | --- |
 | `PRESS <slot> <key\|-> <src> [from=<F\|D>] [res=<reason>]` | Any combo that reaches the mapping, mapped or not. `from=` means the modifier was held on that other controller. |
 | `CTL <F\|D> <0\|1>` | A controller connected or dropped |
+
+### Battery reports
+
+SHADOW reads each controller's battery from the status byte in every input report the
+controller sends. It sends this line to the WCB port by itself, whether or not EVENTS is on:
+
+```text
+@SM BAT F=<lvl> D=<lvl> fs=<st> ds=<st> up=<s> hb=<s> *<CRC>
+```
+
+- **When:** at once when either controller's level changes, and otherwise every `hb` seconds
+  (30), starting 5 s after boot. A change restarts the 30 s period. The same line answers a `BAT`
+  request, on either port.
+- **`F=` / `D=`:** SHADOW's verdict for the foot and dome controller: `OK`, `LOW`, `CRIT`, or `-`
+  when there's no level (not connected, or the first reading of a connection is still settling).
+  These are the words Sabé uses for its remotes. The level is the value to display; don't work
+  it out again from `fs`/`ds`.
+- **`fs=` / `ds=`:** the controller's own reading, detail only: `0`-`5` on battery (5 is full;
+  the Linux driver reads them as 0/1/25/50/75/100 %), `chg` charging on a USB cable, `usb`
+  charged on a cable, `-` none. Not a fuel gauge: five coarse steps.
+- **`up=`:** SHADOW's uptime in seconds. A decrease means SHADOW rebooted (it has forgotten the
+  reply route and EVENTS).
+- **`hb=`:** the report period in seconds. A client that has heard nothing for 3 periods can
+  treat SHADOW as gone.
+- The line goes out through the TX queue like everything else, only when there's room, so it never
+  delays a button command. It goes out during a controller fault too.
+- Comment out `SHADOW_BATTERY_REPORT` in `include/config.h` to stop the unasked lines; `BAT`
+  requests still work.
+- **Where it goes on the Pi:** DroidNet (DroidNetSignalBooster branch `claude/magical-pasteur-1rbyte`, not yet
+  merged) latches the line whenever its SHADOW feature is on and routed, tab open or not. It shows the level on the
+  SHADOW tab's Foot and Dome buttons and publishes it to Comlink as a `shadow` announce object shaped like `sabe`
+  (foot = `drive`, `st` in place of `mv`, `ttl` 90). Comlink (droidnet-comlink branch `claude/magical-pasteur-1rbyte`,
+  not yet merged or built in Xcode) shows it on the Voice tab chip ("FOOT LOW", "CONTROLLERS OK") and the Watch, and
+  alerts once when a controller enters CRIT.
+
+**How the level is decided** (`lib/ShadowMap/src/sm_battery.cpp`):
+
+| Status byte | Reported as | Level |
+| --- | --- | --- |
+| `0x03`-`0x05` | `3`-`5` | `OK` |
+| `0x02` | `2` | `LOW` |
+| `0x00`-`0x01` | `0`-`1` | `CRIT` |
+| `0xEE` and up | `chg` (even) / `usb` (odd) | `OK` |
+| anything else | ignored | |
+
+A new level has to hold before SHADOW adopts it, so a reading flickering at a step boundary
+doesn't flap: 2 s for the first reading of a connection, 3 s for a worse level, 30 s for a
+better one. A controller that disconnects goes to `-` at once.
+
+The status byte comes from `PS3BT::getBatteryStatus()`, added to the bundled USB Host Shield
+library. It's saved only from input reports, so unlike `getStatus()` it never reads a byte of
+some other packet. **Not yet measured on the droid:** how long a Navigation controller keeps
+going after it first reports `LOW` (`2`) or `CRIT` (`1`).
 
 ### Errors
 
@@ -209,7 +263,7 @@ The format is `ERR <code> [<VERB> [<slot>]]`.
   subscription in RAM, so after a reboot its replies go to its own WCB until it hears HELLO.
   `shadowmap.Client` does this, and restores EVENTS.
 - **Ignore everything that isn't a CRC-valid line starting with `@SM `.** That includes events
-  when you aren't expecting them.
+  when you aren't expecting them, and the `BAT` lines SHADOW sends unasked.
 
 ### Discovery
 

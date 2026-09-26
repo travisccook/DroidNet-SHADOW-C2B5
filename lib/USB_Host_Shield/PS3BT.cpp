@@ -209,6 +209,7 @@ void PS3BT::Reset() {
         PS3MoveConnected = false;
         PS3NavigationConnected = false;
         activeConnection = false;
+        batteryStatus = 0;
         l2cap_event_flag = 0; // Reset flags
         l2cap_state = L2CAP_WAIT;
 
@@ -349,6 +350,10 @@ void PS3BT::ACLData(uint8_t* ACLData) {
                                                 ButtonState = (uint32_t)(l2capinbuf[11] | ((uint16_t)l2capinbuf[12] << 8) | ((uint32_t)l2capinbuf[13] << 16));
                                         else if(PS3MoveConnected)
                                                 ButtonState = (uint32_t)(l2capinbuf[10] | ((uint16_t)l2capinbuf[11] << 8) | ((uint32_t)l2capinbuf[12] << 16));
+
+                                        // SHADOW addition: keep the battery byte of input report 0x01 (see getBatteryStatus())
+                                        if(l2capinbuf[9] == 0x01)
+                                                batteryStatus = l2capinbuf[PS3MoveConnected ? ((uint16_t)MoveFull >> 8) : ((uint16_t)Full >> 8)];
 
                                         //Notify(PSTR("\r\nButtonState", 0x80);
                                         //PrintHex<uint32_t>(ButtonState, 0x80);

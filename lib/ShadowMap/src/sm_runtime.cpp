@@ -107,4 +107,31 @@ void Runtime::announce(uint32_t nowMs) {
     nextAnnounce_ = nowMs + between(kAnnounceMinMs, kAnnounceMaxMs);
 }
 
+void Runtime::startBattery(ReplyPort &port, uint32_t nowMs) {
+    batteryPort_ = &port;
+    nextBattery_ = nowMs + kBatteryFirstMs;
+}
+
+bool Runtime::batteries(uint32_t nowMs, bool footConnected, uint8_t footStatus, bool domeConnected,
+                        uint8_t domeStatus) {
+    bool changed = footBattery_.update(nowMs, footConnected, footStatus);
+    changed = domeBattery_.update(nowMs, domeConnected, domeStatus) || changed;
+    if (changed)
+        batteryChanged_ = true;
+    protocol_.setBattery({footBattery_.level(), footBattery_.status(), domeBattery_.level(), domeBattery_.status(),
+                          nowMs});
+    return changed;
+}
+
+void Runtime::reportBattery(uint32_t nowMs) {
+    if (batteryPort_ == nullptr)
+        return;
+    if (!batteryChanged_ && static_cast<int32_t>(nowMs - nextBattery_) < 0)
+        return;
+    if (!protocol_.sendBattery(*batteryPort_))
+        return;  // busy right now; try again next pass
+    batteryChanged_ = false;
+    nextBattery_ = nowMs + kBatteryPeriodMs;
+}
+
 }  // namespace sm

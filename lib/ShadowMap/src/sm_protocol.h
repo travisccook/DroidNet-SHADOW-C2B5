@@ -9,6 +9,7 @@
 
 #include <stdint.h>
 
+#include "sm_battery.h"
 #include "sm_store.h"
 #include "sm_tx.h"
 
@@ -75,6 +76,13 @@ class Protocol {
     // Controller connection state, for READY and (with EVENTS on) "@SM CTL" events.
     void setPads(bool footConnected, bool domeConnected);
 
+    // The controllers' battery levels, for "@SM BAT" (a BAT request, or sendBattery()).
+    void setBattery(const BatteryReport &report) { battery_ = report; }
+
+    // Sends "@SM BAT F=<lvl> D=<lvl> fs=<status> ds=<status> up=<s> hb=<s>" to `port`, or
+    // nothing if the port has no room right now; returns whether it was sent.
+    bool sendBattery(ReplyPort &port);
+
     bool opInProgress() const { return op_ != Op::None; }
 
   private:
@@ -101,6 +109,7 @@ class Protocol {
     ReplyPort *eventPort_ = nullptr;
     uint8_t pads_ = 0;          // bit 0 foot, bit 1 dome
     uint8_t padsReported_ = 0;  // what the event port last heard
+    BatteryReport battery_ = {};
 };
 
 }  // namespace sm

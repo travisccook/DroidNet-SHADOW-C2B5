@@ -18,6 +18,7 @@ Command line:
     shadowmap.py --wcb /dev/ttyUSB0 --shadow-port 3 dump
     shadowmap.py --wcb /dev/ttyUSB0 --shadow-port 3 set F L1 UP scream
     shadowmap.py --usb /dev/ttyACM0 get F L1 UP        (resets the Mega when it opens the port)
+    shadowmap.py --wcb /dev/ttyUSB0 --shadow-port 3 battery
 
 Only the standard library is needed, plus pyserial for the command line.
 """
@@ -187,8 +188,42 @@ def parse_ready(body: str) -> Ready:
 
 
 @dataclass
+class Battery:
+    """An '@SM BAT' line: both controllers' battery levels.
+
+    SHADOW sends one when a level changes and every `period_s` anyway, whether or not EVENTS
+    is on, and also in reply to '@SM BAT'.
+    """
+
+    foot: Optional[str]  # OK, LOW or CRIT; None while unknown (not connected, or settling)
+    dome: Optional[str]
+    foot_status: Optional[str]  # the controller's own reading: "0".."5", "chg", "usb"; None
+    dome_status: Optional[str]
+    uptime_s: Optional[int]
+    period_s: Optional[int]
+
+
+def parse_battery(body: str) -> Optional[Battery]:
+    """'@SM BAT F=OK D=- fs=4 ds=- up=65 hb=30' -> Battery; None if it isn't a BAT line."""
+    t = body.split(" ")
+    if len(t) < 2 or t[:2] != ["@SM", "BAT"]:
+        return None
+    kv = _kv(t[2:])
+
+    def text(key: str) -> Optional[str]:
+        v = kv.get(key)
+        return None if v in (None, "-") else v
+
+    def number(key: str) -> Optional[int]:
+        v = kv.get(key, "")
+        return int(v) if v.isdigit() else None
+
+    return Battery(text("F"), text("D"), text("fs"), text("ds"), number("up"), number("hb"))
+
+
+@dataclass
 class Event:
-    kind: str  # PRESS or CTL
+    kind: str  # PRESS, CTL or BAT
     slot: Optional[Slot] = None
     key: str = ""
     source: str = ""
@@ -196,6 +231,7 @@ class Event:
     reserved: Optional[str] = None
     controller: Optional[str] = None
     connected: Optional[bool] = None
+    battery: Optional[Battery] = None
 
 
 def parse_event(body: str) -> Optional[Event]:
@@ -205,6 +241,9 @@ def parse_event(body: str) -> Optional[Event]:
         return Event("PRESS", Slot(t[2], t[3], t[4]), "" if t[5] == "-" else t[5], t[6], kv.get("from"), kv.get("res"))
     if len(t) == 4 and t[1] == "CTL":
         return Event("CTL", controller=t[2], connected=t[3] == "1")
+    battery = parse_battery(body)
+    if battery is not None:
+        return Event("BAT", battery=battery)
     return None
 
 
@@ -280,7 +319,9 @@ class Client:
         self.transport.write_line(line)
 
     def _replies(self, deadline: float):
-        """Valid @SM reply bodies until the deadline. Events go to on_event, not the caller."""
+        """Valid @SM reply bodies until the deadline. Events go to on_event, not the caller.
+
+        A BAT line goes to both: it's the reply to '@SM BAT' and also arrives unasked."""
         while True:
             left = deadline - time.monotonic()
             if left <= 0:
@@ -299,7 +340,8 @@ class Client:
             if event is not None:
                 if self.on_event:
                     self.on_event(event)
-                continue
+                if event.kind != "BAT":
+                    continue
             yield body
 
     def request(self, body: str, accept: Callable[[str], bool], expect_lines: int = 1) -> List[str]:
@@ -409,6 +451,10 @@ class Client:
         h = _hex(suffix)
         self.request(f"@SM SUFFIX {h}", lambda r: r == f"@SM OK SUFFIX {h}")
 
+    def battery(self) -> Battery:
+        """Both controllers' battery levels. The unasked report is just as current, so either will do."""
+        return parse_battery(self.request("@SM BAT", lambda r: r.startswith("@SM BAT "))[0])
+
     def events(self, on: bool) -> None:
         want = f"@SM OK EVENTS {1 if on else 0}"
         self.request(f"@SM EVENTS {1 if on else 0}", lambda r: r == want)
@@ -471,7 +517,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--shadow-port", type=int, default=0, help="WCB S-port SHADOW is wired to")
     ap.add_argument("--shadow-wcb", type=int, help="SHADOW's WCB number, if not the Pi's WCB")
     ap.add_argument("--pi-wcb", type=int, help="the Pi's WCB number (with --shadow-wcb)")
-    ap.add_argument("command", choices=["hello", "get", "set", "revert", "dump", "sum", "defaults", "cfg", "watch"])
+    ap.add_argument("command", choices=["hello", "get", "set", "revert", "dump", "sum", "defaults", "cfg", "battery", "watch"])
     ap.add_argument("args", nargs="*")
     a = ap.parse_args(argv)
 
@@ -502,6 +548,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("gen", client.defaults())
     elif a.command == "cfg":
         print("prefix=%r suffix=%r" % client.cfg())
+    elif a.command == "battery":
+        print(client.battery())
     elif a.command == "watch":
         client.on_event = lambda e: print(e)
         client.events(True)
