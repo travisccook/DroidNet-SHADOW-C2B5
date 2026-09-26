@@ -2,6 +2,7 @@
 #pragma once
 
 #include "sm_pgm.h"
+#include "sm_battery.h"
 #include "sm_crc.h"
 #include "sm_eeprom.h"
 #include "sm_line.h"

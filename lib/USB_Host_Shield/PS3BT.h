@@ -185,6 +185,17 @@ public:
         };
 
         /**
+         * The battery status byte from the last input report (SHADOW addition). Unlike
+         * getStatus(), which reads whatever L2CAP packet arrived last, this is only updated
+         * from an input report, so it is never a byte of some other packet.
+         * @return 0x01 (Shutdown) to 0x05 (Full), 0xEE and up on a USB cable (see ::StatusEnum),
+         * or 0 before the first report of this connection.
+         */
+        uint8_t getBatteryStatus() {
+                return batteryStatus;
+        };
+
+        /**
          * Used to call your own function when the controller is successfully initialized.
          * @param funcOnInit Function to call.
          */
@@ -224,6 +235,7 @@ private:
         uint32_t l2cap_event_flag; // L2CAP flags of received Bluetooth events
 
         uint32_t lastMessageTime; // Variable used to store the millis value of the last message.
+        uint8_t batteryStatus; // Battery byte of the last input report; 0 = none yet (SHADOW addition)
 
         unsigned long timer;
 

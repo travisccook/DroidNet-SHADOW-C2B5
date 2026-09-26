@@ -5,6 +5,7 @@
 
 #include <stdint.h>
 
+#include "sm_battery.h"
 #include "sm_line.h"
 #include "sm_protocol.h"
 #include "sm_resolve.h"
@@ -45,6 +46,17 @@ class Runtime {
     // Call once at the end of setup(). `seed` varies the announce intervals (any value).
     void startAnnounce(uint32_t nowMs, uint32_t seed);
 
+    // Call once at the end of setup(): "@SM BAT" lines go to `port` (the WCB) when a
+    // controller's battery level changes and every kBatteryPeriodMs, the first
+    // kBatteryFirstMs from now. They don't depend on EVENTS.
+    void startBattery(ReplyPort &port, uint32_t nowMs);
+
+    // Once per pass, faults included: each controller's connection and battery status byte
+    // (PS3BT::getBatteryStatus()). Returns true when either controller's level changed.
+    bool batteries(uint32_t nowMs, bool footConnected, uint8_t footStatus, bool domeConnected, uint8_t domeStatus);
+    const BatteryWatch &footBattery() const { return footBattery_; }
+    const BatteryWatch &domeBattery() const { return domeBattery_; }
+
     // Once per pass, after the controllers have been read: the dome controller, then the foot,
     // as the old code did. A combo fires when pressed and again every second while held; the
     // repeat timer is shared by both controllers. Returns true, filling `fired`, when a combo
@@ -75,14 +87,16 @@ class Runtime {
     }
 
     // Every pass, faults included: finishes protocol work, advances EEPROM writes, sends the
-    // announce when due, and hands queued bytes to the WCB's UART. Pass `mayAnnounce` false
-    // while a controller fault is active: a due announce then waits for the fault to clear.
+    // announce and battery report when due, and hands queued bytes to the WCB's UART. Pass
+    // `mayAnnounce` false while a controller fault is active: a due announce then waits for
+    // the fault to clear. Battery reports carry on through a fault.
     template <class Serial>
     void service(uint32_t nowMs, Serial &wcb, bool mayAnnounce = true) {
         protocol_.service();
         store_.step();
         if (mayAnnounce)
             announce(nowMs);
+        reportBattery(nowMs);
         tx_.drain(wcb);
     }
 
@@ -90,6 +104,7 @@ class Runtime {
     bool handlePad(Ctrl ctrl, const PadState &self, const PadState &other, uint32_t nowMs, FiredPress *fired);
     bool fire(uint8_t slot, bool modFromOther, FiredPress *fired);
     void announce(uint32_t nowMs);
+    void reportBattery(uint32_t nowMs);
     uint32_t between(uint32_t lo, uint32_t hi);  // pseudo-random, lo..hi inclusive
 
     MapStore &store_;
@@ -105,6 +120,12 @@ class Runtime {
     bool announcing_ = false;
     uint32_t nextAnnounce_ = 0;
     uint32_t rng_ = 1;
+
+    BatteryWatch footBattery_;
+    BatteryWatch domeBattery_;
+    ReplyPort *batteryPort_ = nullptr;
+    bool batteryChanged_ = false;  // a level changed since the last report
+    uint32_t nextBattery_ = 0;
 };
 
 }  // namespace sm

@@ -145,6 +145,9 @@ class WcbEmulator(smc.Transport):
     def tick(self, ms: int) -> None:
         self._shadow(f"!!TICK {ms}")
 
+    def battery(self, foot: int, dome: int) -> None:
+        self._shadow(f"!!BATT {foot:x} {dome:x}")
+
     def cut_after(self, writes: int) -> None:
         self._shadow(f"!!CUT {writes}")
 
@@ -294,6 +297,30 @@ class ContractTest(unittest.TestCase):
         self.client.set_suffix("")
         self.wcb.press(dome=L2 | LEFT)
         self.assertEqual(";W1;CGDcollar", self.wcb.commands[-1])
+
+    def test_battery_reports(self):
+        self.assertEqual(smc.Battery(None, None, None, None, 0, 30), self.client.battery())
+        events = []
+        self.client.on_event = events.append
+        self.wcb.battery(0x04, 0x02)
+        self.wcb.tick(3000)  # a first reading settles in 2 s, and the change goes out at once
+        self.client.listen(0.01)
+        bats = [e.battery for e in events if e.kind == "BAT"]
+        self.assertEqual(1, len(bats))  # unasked: EVENTS is off
+        self.assertEqual(("OK", "LOW", "4", "2", 30), (bats[0].foot, bats[0].dome, bats[0].foot_status,
+                                                       bats[0].dome_status, bats[0].period_s))
+        self.wcb.battery(0xEE, 0x02)
+        self.assertEqual("chg", self.client.battery().foot_status)
+        self.wcb.press(dome_on=False)  # the dome drops: its level is forgotten at once
+        self.client.listen(0.01)
+        self.assertEqual((None, None), (events[-1].battery.dome, events[-1].battery.dome_status))
+
+    def test_battery_heartbeats_do_not_disturb_requests(self):
+        self.wcb.tick(62000)  # two heartbeats (5 s and 35 s) are waiting when the DUMP goes out
+        self.assertEqual(2, sum(1 for line in self.wcb.usb if line.startswith("@SM BAT ")))
+        dump = self.client.dump()
+        self.assertEqual(72, len(dump))
+        self.assertEqual(dump[40], self.client.get(dump[40].slot))
 
     def test_announce(self):
         self.wcb.tick(6000)  # the first 0.5-3 s after boot, the next 25-30 s after that

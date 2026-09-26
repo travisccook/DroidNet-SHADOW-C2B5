@@ -274,9 +274,45 @@ void mappedButtons() {
 #endif
 }
 
+#ifdef SHADOW_VERBOSE
+const char *battLevelName(sm::BattLevel level) {
+    switch (level) {
+        case sm::BattLevel::Ok:
+            return "OK";
+        case sm::BattLevel::Low:
+            return "LOW";
+        case sm::BattLevel::Crit:
+            return "CRIT";
+        default:
+            return "-";
+    }
+}
+#endif
+
+// The controllers' battery levels, for "@SM BAT". Every pass, faults included.
+void watchBatteries() {
+    const bool changed =
+        mapRuntime.batteries(millis(), PS3NavFoot->PS3NavigationConnected, PS3NavFoot->getBatteryStatus(),
+                             PS3NavDome->PS3NavigationConnected, PS3NavDome->getBatteryStatus());
+#ifdef SHADOW_VERBOSE
+    if (changed) {
+        output += "Controller battery: foot ";
+        output += battLevelName(mapRuntime.footBattery().level());
+        output += ", dome ";
+        output += battLevelName(mapRuntime.domeBattery().level());
+        output += "\r\n";
+    }
+#else
+    (void)changed;
+#endif
+}
+
 // Everything the mapping does between button presses. Runs every pass, faults included, but
 // SHADOW doesn't announce itself to the WCB while a controller fault is active.
-void serviceMapping(bool faulted) { mapRuntime.service(millis(), Serial1, !faulted); }
+void serviceMapping(bool faulted) {
+    watchBatteries();
+    mapRuntime.service(millis(), Serial1, !faulted);
+}
 
 // =======================================================================================
 //                          Main Program
@@ -349,6 +385,10 @@ void setup() {
 
     // First WCB device announce in 0.5-3 s (if SHADOW_WDP_ANNOUNCE is on).
     mapRuntime.startAnnounce(millis(), static_cast<uint32_t>(random()));
+#ifdef SHADOW_BATTERY_REPORT
+    // First controller battery report in 5 s, then on every change and every 30 s.
+    mapRuntime.startBattery(wcbReplies, millis());
+#endif
 }
 
 // =======================================================================================

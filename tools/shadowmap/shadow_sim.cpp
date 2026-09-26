@@ -8,6 +8,7 @@
 //   !!PRESS <foot-mask> <dome-mask> [<foot-connected> <dome-connected>]
 //                         hold these buttons (HeldBit masks, hex) for one press
 //   !!TICK <ms>           let time pass with nothing held
+//   !!BATT <foot> <dome>  the controllers' battery status bytes from now on (hex, 0 = none)
 //   !!CUT <writes>        power fails after that many more EEPROM byte writes
 //   !!REBOOT              restart SHADOW (EEPROM survives, RAM doesn't)
 //
@@ -100,6 +101,8 @@ struct InputQueue {
 };
 
 uint32_t now = 0;
+uint8_t footBattery = 0;
+uint8_t domeBattery = 0;
 
 struct Shadow {
     explicit Shadow(FileEeprom &eeprom)
@@ -107,6 +110,7 @@ struct Shadow {
           runtime(store, protocol, tx, "sim") {
         store.begin();
         runtime.startAnnounce(now, 1);  // as at the end of main.cpp's setup()
+        runtime.startBattery(port, now);
     }
     sm::MapStore store;
     sm::TxQueue tx;
@@ -120,6 +124,7 @@ void pass(Shadow &s, FileEeprom &eeprom, StdoutUart &uart, InputQueue &in, sm::P
     s.runtime.pump(in, s.reader, s.port);
     sm::FiredPress fired;
     s.runtime.buttons(now, foot, dome, &fired);
+    s.runtime.batteries(now, foot.connected, footBattery, dome.connected, domeBattery);
     s.runtime.service(now, uart);
     eeprom.tick();
     uart.refill();
@@ -162,6 +167,10 @@ int main(int argc, char **argv) {
             } else if (sscanf(line.c_str(), "!!TICK %ld", &n) == 1) {
                 for (long t = 0; t < n; t += kPassMs)
                     pass(*shadow, eeprom, uart, in, foot, dome);
+            } else if (sscanf(line.c_str(), "!!BATT %x %x", &footMask, &domeMask) == 2) {
+                footBattery = static_cast<uint8_t>(footMask);
+                domeBattery = static_cast<uint8_t>(domeMask);
+                pass(*shadow, eeprom, uart, in, foot, dome);  // SHADOW reads the controllers every pass
             } else if (sscanf(line.c_str(), "!!CUT %ld", &n) == 1) {
                 eeprom.cutAfter(n);
             } else if (line == "!!REBOOT") {

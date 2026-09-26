@@ -45,12 +45,12 @@ class Out {
         }
         return *this;
     }
-    Out &u(uint16_t v) {
-        char tmp[6];
+    Out &u(uint32_t v) {
+        char tmp[10];
         uint8_t n = 0;
         do {
             tmp[n++] = static_cast<char>('0' + v % 10);
-            v = static_cast<uint16_t>(v / 10);
+            v /= 10;
         } while (v != 0);
         while (n > 0)
             c(tmp[--n]);
@@ -338,6 +338,15 @@ bool Protocol::handleLine(const char *line, ReplyPort &port) {
         return true;
     }
 
+    if (strcmp_P(verb, PSTR("BAT")) == 0) {
+        if (argc != 1) {
+            sendError(port, PSTR("args"), verb, kNoSlot);
+            return true;
+        }
+        sendBattery(port);  // fits: canSend(kMaxLine) was checked above
+        return true;
+    }
+
     if (strcmp_P(verb, PSTR("CFG")) == 0) {
         if (argc != 1) {
             sendError(port, PSTR("args"), verb, kNoSlot);
@@ -622,6 +631,47 @@ void Protocol::notifyPress(uint8_t slot, const char *key, Source src, bool modFr
     if (why != Reserved::No)
         out.p(PSTR(" res=")).p(reservedToken(why));
     emit(out, *eventPort_);
+}
+
+namespace {
+
+PGM_P battLevelToken(BattLevel level) {
+    switch (level) {
+        case BattLevel::Ok:
+            return PSTR("OK");
+        case BattLevel::Low:
+            return PSTR("LOW");
+        case BattLevel::Crit:
+            return PSTR("CRIT");
+        default:
+            return PSTR("-");
+    }
+}
+
+// The raw status byte: "0".."5" on battery, "chg" charging or "usb" charged on a cable, "-" none.
+void battStatusToken(Out &out, uint8_t status) {
+    if (status == 0)
+        out.c('-');
+    else if (status >= 0xEE)
+        out.p((status & 1) != 0 ? PSTR("usb") : PSTR("chg"));
+    else
+        out.u(status);
+}
+
+}  // namespace
+
+bool Protocol::sendBattery(ReplyPort &port) {
+    if (!port.canSend(kMaxLine))
+        return false;
+    Out out;
+    out.p(PSTR("@SM BAT F=")).p(battLevelToken(battery_.foot)).p(PSTR(" D=")).p(battLevelToken(battery_.dome));
+    out.p(PSTR(" fs="));
+    battStatusToken(out, battery_.footStatus);
+    out.p(PSTR(" ds="));
+    battStatusToken(out, battery_.domeStatus);
+    out.p(PSTR(" up=")).u(battery_.nowMs / 1000).p(PSTR(" hb=")).u(kBatteryPeriodMs / 1000);
+    emit(out, port);
+    return true;
 }
 
 void Protocol::setPads(bool footConnected, bool domeConnected) {

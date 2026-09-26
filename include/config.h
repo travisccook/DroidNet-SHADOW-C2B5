@@ -31,6 +31,11 @@
 // 6.2.1, which would broadcast the announce line to every board instead of recognising it.
 #define SHADOW_WDP_ANNOUNCE
 
+// Report the controllers' battery levels to DroidNet ("@SM BAT", through the WCB to the Pi)
+// when one changes and every 30 s. Comment out to stop the reports; DroidNet can still ask
+// with "@SM BAT".
+#define SHADOW_BATTERY_REPORT
+
 // ---------------------------------------------------------------------------------------
 //                          PS3 Controller MAC Addresses
 // ---------------------------------------------------------------------------------------
