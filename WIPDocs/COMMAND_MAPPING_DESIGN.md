@@ -363,6 +363,8 @@ That replaces the old control-mapping spreadsheet, which is retired. DroidNet ow
 - Slots use the same `<C> <M> <B>` names as the protocol. Each is `{key: string|null, src: "default"|"eeprom"}`, so a
   custom value that happens to equal the default stays distinct.
 - Reserved slots are left out.
+- Version 2 (DroidNetSignalBooster `193851b`) adds the double taps under their wire names (`"UP2": {...}`) next to the
+  single presses. DroidNet imports version 1 and 2 files.
 - `labels` are DroidNet's descriptions of the WCB stored commands, kept on the Pi. SHADOW never sees them.
 
 ## Firmware structure
@@ -440,6 +442,8 @@ python3 -m unittest tools/shadowmap/test_shadowmap.py   # reference client vs. t
 ## Not done yet
 
 - On the droid: real button presses, driving while editing, and a power cycle (HANDOFF_BUTTON_MAP.md §0).
+- On the droid: double taps (`bde79a4`). Tested on the host, simavr and through DroidNet against the simulator only.
+  Worth checking: that 350 ms suits a Navigation controller's D-pad, and the v2 DUMP time through the WCB.
 - The DroidNet tab and backend (see the [backend design](https://github.com/travisccook/DroidNetSignalBooster/blob/main/docs/superpowers/specs/2026-09-24-shadow-button-map-design.md)).
 - New WCB stored commands for volume and brightness, then map them.
 - Maybe: a "learn" mode (report a press without firing it) and a lock notice. Neither is built.
