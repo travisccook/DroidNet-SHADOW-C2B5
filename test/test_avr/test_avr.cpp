@@ -121,6 +121,35 @@ static void test_per_pass_work_is_bounded() {
     }
     report("pass during SET", worst);
 
+    // A double-tap slot: its write also refreshes the RAM copy of what's mapped.
+    withCrc("@SM SET D CIRCLE RIGHT2 abcdefghijklmno", line, sizeof(line));
+    t = micros();
+    TEST_ASSERT_TRUE(protocol.handleLine(line, port));
+    report("handleLine(SET double)", micros() - t);
+    worst = 0;
+    for (uint32_t i = 0; i < 200000UL && (store.busy() || protocol.opInProgress()); ++i) {
+        t = micros();
+        protocol.service();
+        store.step();
+        tx.drain(wcb);
+        const unsigned long dt = micros() - t;
+        if (dt > worst)
+            worst = dt;
+    }
+    report("pass during SET double", worst);
+    TEST_ASSERT_TRUE(store.doubleTapMapped(slotIndex(Ctrl::D, Mod::CIRCLE, Btn::RIGHT)));
+
+    // Boot reads every double-tap record once (setup(), not the loop).
+    static MapStore rebooted(io, kTestDefaults, kTestDefaultCount);
+    t = micros();
+    rebooted.begin();
+    const unsigned long bootMicros = micros() - t;
+    char bootMsg[48];
+    snprintf(bootMsg, sizeof(bootMsg), "begin() with double taps: %lu us", bootMicros);
+    TEST_MESSAGE(bootMsg);
+    TEST_ASSERT_TRUE(bootMicros < 50000UL);
+    TEST_ASSERT_TRUE(rebooted.doubleTapMapped(slotIndex(Ctrl::D, Mod::CIRCLE, Btn::RIGHT)));
+
     withCrc("@SM DUMP", line, sizeof(line));
     while (!protocol.handleLine(line, port))
         tx.drain(wcb);
@@ -145,6 +174,23 @@ static void test_per_pass_work_is_bounded() {
     TEST_ASSERT_TRUE(pushCommand(tx, store.prefix(), key, store.suffix()));
     tx.drain(wcb);
     report("button press", micros() - t);
+
+    // Button passes through the runtime: the second tap of a double tap, the worst of them.
+    static Runtime taps(store, protocol, tx, nullptr);
+    FiredPress fired;
+    const PadState none = {true, 0}, circle = {true, kHeldCircle}, right = {true, kHeldCircle | kHeldRight};
+    worst = 0;
+    const PadState seq[] = {right, circle, right, none};
+    for (uint8_t i = 0; i < 4; ++i) {
+        t = micros();
+        taps.buttons(20000UL + i * 50UL, none, seq[i], &fired);
+        const unsigned long dt = micros() - t;
+        if (dt > worst)
+            worst = dt;
+    }
+    tx.drain(wcb);
+    TEST_ASSERT_EQUAL_STRING("abcdefghijklmno", fired.key);
+    report("button pass (double tap)", worst);
 
     // A pass that sends the WCB device announce (builds the line, draws the next interval).
     static Runtime runtime(store, protocol, tx, "abcdef0123+");

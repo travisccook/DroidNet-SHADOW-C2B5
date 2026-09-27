@@ -17,6 +17,7 @@ opening that port resets the Mega.
 Command line:
     shadowmap.py --wcb /dev/ttyUSB0 --shadow-port 3 dump
     shadowmap.py --wcb /dev/ttyUSB0 --shadow-port 3 set F L1 UP scream
+    shadowmap.py --wcb /dev/ttyUSB0 --shadow-port 3 set F L1 UP2 scream   (UP2 = UP tapped twice)
     shadowmap.py --usb /dev/ttyACM0 get F L1 UP        (resets the Mega when it opens the port)
     shadowmap.py --wcb /dev/ttyUSB0 --shadow-port 3 battery
 
@@ -36,6 +37,9 @@ from typing import Callable, Dict, Iterable, List, Optional, Tuple
 CONTROLLERS = ("F", "D")
 MODIFIERS = ("NONE", "L1", "L2", "PS", "CIRCLE", "CROSS")
 BUTTONS = ("UP", "RIGHT", "DOWN", "LEFT", "L3", "PS")
+PROTOCOL_VERSION = 2  # v2 added the double-tap slots
+SINGLE_SLOTS = 72  # 0-71 single presses; 72-143 the same combos tapped twice
+SLOT_COUNT = 2 * SINGLE_SLOTS
 KEY_RE = re.compile(r"^[A-Za-z0-9_]{1,15}$")
 FORBIDDEN = ("^",)  # the WCB splits commands on it
 
@@ -92,6 +96,7 @@ class Slot:
     ctl: str  # F or D
     mod: str  # NONE L1 L2 PS CIRCLE CROSS
     btn: str  # UP RIGHT DOWN LEFT L3 PS
+    double: bool = False  # the button tapped twice; written "UP2" on the wire
 
     def __post_init__(self):
         if self.ctl not in CONTROLLERS or self.mod not in MODIFIERS or self.btn not in BUTTONS:
@@ -99,25 +104,34 @@ class Slot:
 
     @property
     def index(self) -> int:
-        return CONTROLLERS.index(self.ctl) * 36 + MODIFIERS.index(self.mod) * 6 + BUTTONS.index(self.btn)
+        single = CONTROLLERS.index(self.ctl) * 36 + MODIFIERS.index(self.mod) * 6 + BUTTONS.index(self.btn)
+        return single + SINGLE_SLOTS if self.double else single
 
     @classmethod
     def from_index(cls, i: int) -> "Slot":
-        return cls(CONTROLLERS[i // 36], MODIFIERS[(i % 36) // 6], BUTTONS[i % 6])
+        j = i % SINGLE_SLOTS
+        return cls(CONTROLLERS[j // 36], MODIFIERS[(j % 36) // 6], BUTTONS[j % 6], i >= SINGLE_SLOTS)
+
+    @classmethod
+    def from_tokens(cls, ctl: str, mod: str, btn: str) -> "Slot":
+        """The three wire tokens, e.g. ("F", "L1", "UP2")."""
+        if btn.endswith("2") and btn[:-1] in BUTTONS:
+            return cls(ctl, mod, btn[:-1], True)
+        return cls(ctl, mod, btn)
 
     @classmethod
     def parse(cls, text: str) -> "Slot":
         parts = text.replace(".", " ").split()
         if len(parts) != 3:
-            raise ValueError(f"slot is 'F L1 UP', got {text!r}")
-        return cls(*parts)
+            raise ValueError(f"slot is 'F L1 UP' (or 'F L1 UP2' for a double tap), got {text!r}")
+        return cls.from_tokens(*parts)
 
     def __str__(self) -> str:
-        return f"{self.ctl} {self.mod} {self.btn}"
+        return f"{self.ctl} {self.mod} {self.btn}{'2' if self.double else ''}"
 
 
 def all_slots() -> List[Slot]:
-    return [Slot.from_index(i) for i in range(72)]
+    return [Slot.from_index(i) for i in range(SLOT_COUNT)]
 
 
 @dataclass
@@ -126,7 +140,7 @@ class SlotState:
     key: str  # "" = unmapped
     source: str  # eeprom | default | reserved
     default: Optional[str] = None  # built-in key ("" = none); None for reserved slots
-    reserved: Optional[str] = None  # psgate | overspeed
+    reserved: Optional[str] = None  # psgate | overspeed | stick
 
     @property
     def body(self) -> str:
@@ -140,8 +154,8 @@ class SlotState:
 def map_sum(states: Iterable[SlotState]) -> str:
     """What @SM SUM returns for this map: CRC32 over each slot's SLOT body plus '\\n'."""
     ordered = sorted(states, key=lambda s: s.slot.index)
-    if len(ordered) != 72:
-        raise ValueError("need all 72 slots")
+    if len(ordered) != SLOT_COUNT:
+        raise ValueError(f"need all {SLOT_COUNT} slots")
     data = "".join(s.body + "\n" for s in ordered)
     return "%08X" % (zlib.crc32(data.encode("ascii")) & 0xFFFFFFFF)
 
@@ -165,7 +179,7 @@ def parse_slot_state(body: str) -> SlotState:
     default = None
     if "def" in kv:
         default = "" if kv["def"] == "-" else kv["def"]
-    return SlotState(Slot(t[2], t[3], t[4]), key, t[6], default, kv.get("res"))
+    return SlotState(Slot.from_tokens(t[2], t[3], t[4]), key, t[6], default, kv.get("res"))
 
 
 @dataclass
@@ -238,7 +252,8 @@ def parse_event(body: str) -> Optional[Event]:
     t = body.split(" ")
     if len(t) >= 7 and t[1] == "PRESS":
         kv = _kv(t[7:])
-        return Event("PRESS", Slot(t[2], t[3], t[4]), "" if t[5] == "-" else t[5], t[6], kv.get("from"), kv.get("res"))
+        return Event("PRESS", Slot.from_tokens(t[2], t[3], t[4]), "" if t[5] == "-" else t[5], t[6], kv.get("from"),
+                     kv.get("res"))
     if len(t) == 4 and t[1] == "CTL":
         return Event("CTL", controller=t[2], connected=t[3] == "1")
     battery = parse_battery(body)
@@ -397,7 +412,10 @@ class Client:
 
     def hello(self) -> Ready:
         body = "@SM HELLO" if self.route is None else f"@SM HELLO {self.route.hello_route}"
-        return parse_ready(self.request(body, lambda r: r.startswith("@SM READY "))[0])
+        ready = parse_ready(self.request(body, lambda r: r.startswith("@SM READY "))[0])
+        if ready.version != PROTOCOL_VERSION:
+            raise ProtocolError("version", f"SHADOW speaks v{ready.version}; this client speaks v{PROTOCOL_VERSION}")
+        return ready
 
     def get(self, slot: Slot) -> SlotState:
         want = f"@SM SLOT {slot} "
@@ -419,17 +437,17 @@ class Client:
 
     def dump(self) -> List[SlotState]:
         lines = self.request("@SM DUMP", lambda r: r.startswith("@SM SLOT ") or r.startswith("@SM END DUMP"),
-                             expect_lines=73)
-        if lines[-1] != "@SM END DUMP 72":
+                             expect_lines=SLOT_COUNT + 1)
+        if lines[-1] != f"@SM END DUMP {SLOT_COUNT}":
             raise ProtocolError("parse", lines[-1])
         states = [parse_slot_state(l) for l in lines[:-1]]
-        if [s.slot.index for s in states] != list(range(72)):
+        if [s.slot.index for s in states] != list(range(SLOT_COUNT)):
             raise ProtocolError("dump order")
         return states
 
     def sum(self) -> str:
         reply = self.request("@SM SUM", lambda r: r.startswith("@SM SUM "))[0]
-        m = re.match(r"^@SM SUM ([0-9A-F]{8}) slots=72$", reply)
+        m = re.match(rf"^@SM SUM ([0-9A-F]{{8}}) slots={SLOT_COUNT}$", reply)
         if not m:
             raise ProtocolError("parse", reply)
         return m.group(1)
@@ -466,8 +484,8 @@ class Client:
             pass
 
     def read_map(self, cached: Optional[List[SlotState]] = None) -> List[SlotState]:
-        """The full map, skipping the ~6 s DUMP when `cached` still matches SHADOW's SUM."""
-        if cached is not None and len(cached) == 72 and map_sum(cached) == self.sum():
+        """The full map, skipping the ~9 s DUMP when `cached` still matches SHADOW's SUM."""
+        if cached is not None and len(cached) == SLOT_COUNT and map_sum(cached) == self.sum():
             return cached
         return self.dump()
 

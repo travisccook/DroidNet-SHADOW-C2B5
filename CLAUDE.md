@@ -33,7 +33,7 @@ python3 -m unittest tools/shadowmap/test_shadowmap.py   # Pi-side client vs. the
 
 - `src/main.cpp`: controller setup, fault detection, drive/dome motor control; reads the controllers into `sm::PadState` and hands button mapping to `sm::Runtime`
 - `src/config.cpp` / `include/config.h`: speeds, baud rates, `SHADOW_WDP_ANNOUNCE`. `SHADOW_FW_VERSION` is set by the build to the git commit (`scripts/git_rev.py`)
-- `src/default_mappings.cpp`: the built-in button mappings (combo → WCB stored-command key) and the list of hardcoded combos
+- `src/default_mappings.cpp`: the built-in button mappings (combo → WCB stored-command key) and the list of hardcoded combos. Every combo also has a double-tap slot (`UP2` on the wire; none on L3); a combo whose double tap is mapped waits `SHADOW_DOUBLE_TAP_MS` for a second press before firing its own command
 - `lib/ShadowMap/`: the runtime-editable button mapping (no Arduino dependency, so it builds and tests on the host): slot layout and lookup rule, EEPROM store, the `@SM` protocol DroidNet uses to edit mappings over the WCB link, controller battery levels (`sm_battery`), the Serial1 TX queue, and `sm::Runtime` (what `loop()` does for the mapping). Design and protocol reference: `WIPDocs/COMMAND_MAPPING_DESIGN.md`
 - `tools/shadowmap/`: reference Pi-side client (`shadowmap.py`, also a CLI), a host build of SHADOW's mapping side (`shadow_sim.cpp`), and their contract tests
 - `test/`: Unity tests for `native` and `simavr`, including a replay of every button combination through the old table code (`test_legacy_equivalence`)
@@ -58,7 +58,7 @@ python3 -m unittest tools/shadowmap/test_shadowmap.py   # Pi-side client vs. the
 
 1. **Safety Critical Code**: The main control loop must never be blocked. Motor control and fault detection require real-time responses.
 2. **Serial Communication**: All inter-board communication uses 9600 baud. Higher rates have proven unreliable in the electrically noisy droid environment.
-3. **Button Mapping**: DroidNet changes mappings at runtime (stored in EEPROM, which survives reboots and uploads). To change the built-in defaults, edit `src/default_mappings.cpp` and run the tests. DroidNet shows the live mapping; the old control-mapping spreadsheet is retired. EEPROM holds the mapping (1360 bytes from address 0); anything else that uses EEPROM must start after that.
+3. **Button Mapping**: DroidNet changes mappings at runtime (stored in EEPROM, which survives reboots and uploads). To change the built-in defaults, edit `src/default_mappings.cpp` and run the tests. DroidNet shows the live mapping; the old control-mapping spreadsheet is retired. EEPROM holds the mapping (2656 bytes from address 0: the single presses, then their double taps); anything else that uses EEPROM must start after that.
 
 ## Development Best Practices
 

@@ -12,11 +12,16 @@ SM_DEFINE_TEST_DEFAULTS
 namespace {
 
 FakeEeprom *eeprom = nullptr;
-uint8_t baseMem[FakeEeprom::kSize];  // snapshot for the power-cut loops (one copy: SRAM is tight on AVR)
+// Snapshot for the power-cut loops: the headers and single-press slots, which is all they
+// write (the double-tap slots stay erased). One copy only: SRAM is tight on AVR.
+uint8_t baseMem[FakeEeprom::kFlat];
 
-void snapshot() { memcpy(baseMem, eeprom->mem, sizeof(baseMem)); }
+void snapshot() {
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, eeprom->doubleRecordsUsed(), "snapshot() only covers the single-press slots");
+    memcpy(baseMem, eeprom->mem, sizeof(baseMem));
+}
 void restore() {
-    *eeprom = FakeEeprom();
+    eeprom->reset();
     memcpy(eeprom->mem, baseMem, sizeof(baseMem));
 }
 
@@ -54,7 +59,7 @@ void tearDown() {}
 
 void setUp() {
     static FakeEeprom instance;
-    instance = FakeEeprom();
+    instance.reset();
     eeprom = &instance;
 }
 
@@ -110,7 +115,7 @@ static void test_clear_and_overwrite() {
 static void test_rejections() {
     MapStore store(*eeprom, kTestDefaults, kTestDefaultCount);
     store.begin();
-    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MapStore::Result::BadSlot), static_cast<uint8_t>(store.beginSet(72, "x")));
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MapStore::Result::BadSlot), static_cast<uint8_t>(store.beginSet(kSlotCount, "x")));
     TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MapStore::Result::Reserved),
                             static_cast<uint8_t>(store.beginSet(slotIndex(Ctrl::F, Mod::L1, Btn::L3), "x")));
     TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MapStore::Result::BadKey),
@@ -437,6 +442,83 @@ static void test_power_cut_during_revert() {
     }
 }
 
+
+// Double taps: the second bank after the single presses, with a RAM copy of which are mapped.
+static void test_double_taps_follow_the_single_slots() {
+    const uint8_t dbl = slotIndex(Ctrl::F, Mod::L1, Btn::UP, Tap::DOUBLE);
+    MapStore store(*eeprom, kTestDefaults, kTestDefaultCount);
+    store.begin();
+    TEST_ASSERT_FALSE(store.doubleTapMapped(kSlotFootL1Up));
+    expectKey(store, dbl, "", Source::Default);
+
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MapStore::Result::Ok), static_cast<uint8_t>(store.beginSet(dbl, "twice")));
+    TEST_ASSERT_FALSE(store.doubleTapMapped(kSlotFootL1Up));  // not until it's written
+    runUntilIdle(store);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MapStore::Completion::Done), static_cast<uint8_t>(store.takeCompletion()));
+    TEST_ASSERT_TRUE(store.doubleTapMapped(kSlotFootL1Up));
+    TEST_ASSERT_TRUE(store.doubleTapMapped(dbl));
+    TEST_ASSERT_FALSE(store.doubleTapMapped(slotIndex(Ctrl::D, Mod::L1, Btn::UP)));
+    expectKey(store, dbl, "twice", Source::Eeprom);
+    expectKey(store, kSlotFootL1Up, "extremehappysou", Source::Default);
+
+    // Where it lives, and the header still says 72 so older firmware keeps reading it.
+    TEST_ASSERT_EQUAL_UINT8('t', eeprom->peek(2 * MapStore::kHeaderSize + dbl * MapStore::kSlotSize));
+    TEST_ASSERT_TRUE(2 * MapStore::kHeaderSize + 72 * MapStore::kSlotSize <= 64 + dbl * MapStore::kSlotSize);
+    TEST_ASSERT_EQUAL_UINT8(72, eeprom->mem[3]);
+    TEST_ASSERT_EQUAL_UINT16(2656, MapStore::kFootprint);
+
+    MapStore rebooted(*eeprom, kTestDefaults, kTestDefaultCount);
+    rebooted.begin();
+    TEST_ASSERT_TRUE(rebooted.doubleTapMapped(kSlotFootL1Up));
+    expectKey(rebooted, dbl, "twice", Source::Eeprom);
+
+    set(rebooted, dbl, "");
+    TEST_ASSERT_FALSE(rebooted.doubleTapMapped(kSlotFootL1Up));
+    set(rebooted, dbl, "again");
+    TEST_ASSERT_TRUE(rebooted.doubleTapMapped(kSlotFootL1Up));
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MapStore::Result::Ok), static_cast<uint8_t>(rebooted.beginRevert(dbl)));
+    runUntilIdle(rebooted);
+    TEST_ASSERT_FALSE(rebooted.doubleTapMapped(kSlotFootL1Up));
+    set(rebooted, dbl, "again");
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MapStore::Result::Ok), static_cast<uint8_t>(rebooted.beginDefaults()));
+    runUntilIdle(rebooted);
+    TEST_ASSERT_FALSE(rebooted.doubleTapMapped(kSlotFootL1Up));
+    expectKey(rebooted, dbl, "", Source::Default);
+
+    // L3 has no double tap.
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MapStore::Result::Reserved),
+                            static_cast<uint8_t>(rebooted.beginSet(slotIndex(Ctrl::D, Mod::NONE, Btn::L3, Tap::DOUBLE), "x")));
+}
+
+static void test_double_tap_defaults_and_failed_writes() {
+    const uint8_t dbl = slotIndex(Ctrl::D, Mod::CROSS, Btn::LEFT, Tap::DOUBLE);
+    static const DefaultMapping withDouble[] PROGMEM = {{kSlotDomeCrossLeft, "scanning"}, {dbl, "scantwice"}};
+    MapStore store(*eeprom, withDouble, 2);
+    store.begin();
+    TEST_ASSERT_TRUE(store.doubleTapMapped(kSlotDomeCrossLeft));  // a built-in double tap
+    set(store, dbl, "");
+    TEST_ASSERT_FALSE(store.doubleTapMapped(kSlotDomeCrossLeft));
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MapStore::Result::Ok), static_cast<uint8_t>(store.beginRevert(dbl)));
+    runUntilIdle(store);
+    TEST_ASSERT_TRUE(store.doubleTapMapped(kSlotDomeCrossLeft));
+    set(store, dbl, "");
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MapStore::Result::Ok), static_cast<uint8_t>(store.beginDefaults()));
+    runUntilIdle(store);
+    TEST_ASSERT_TRUE(store.doubleTapMapped(kSlotDomeCrossLeft));
+
+    // A write that doesn't verify: the RAM copy follows what's really in EEPROM (a bad
+    // record reads as the default).
+    set(store, dbl, "");
+    eeprom->stuckAddr = 2 * MapStore::kHeaderSize + dbl * MapStore::kSlotSize;
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MapStore::Result::Ok), static_cast<uint8_t>(store.beginSet(dbl, "abc")));
+    runUntilIdle(store);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MapStore::Completion::Failed), static_cast<uint8_t>(store.takeCompletion()));
+    TEST_ASSERT_TRUE(store.doubleTapMapped(kSlotDomeCrossLeft));
+    char key[kKeyBuf];
+    TEST_ASSERT_TRUE(store.keyForSlot(dbl, key));
+    TEST_ASSERT_EQUAL_STRING("scantwice", key);
+}
+
 int runAllTests() {
     UNITY_BEGIN();
     RUN_TEST(test_blank_eeprom_reads_defaults);
@@ -456,5 +538,7 @@ int runAllTests() {
     RUN_TEST(test_valid_eeprom_slot_count);
     RUN_TEST(test_revert_erases_one_slot);
     RUN_TEST(test_power_cut_during_revert);
+    RUN_TEST(test_double_taps_follow_the_single_slots);
+    RUN_TEST(test_double_tap_defaults_and_failed_writes);
     return UNITY_END();
 }

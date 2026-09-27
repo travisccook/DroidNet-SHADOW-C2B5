@@ -11,7 +11,9 @@ const char kModTokens[kModCount][7] PROGMEM = {"NONE", "L1", "L2", "PS", "CIRCLE
 const char kBtnTokens[kBtnCount][6] PROGMEM = {"UP", "RIGHT", "DOWN", "LEFT", "L3", "PS"};
 const char kReservedPsGate[] PROGMEM = "psgate";
 const char kReservedOverSpeed[] PROGMEM = "overspeed";
+const char kReservedStick[] PROGMEM = "stick";
 const char kSpace[] PROGMEM = " ";
+const char kDoubleMark[] PROGMEM = "2";
 
 template <uint8_t N, uint8_t W>
 bool parseToken(const char *s, const char (&tokens)[N][W], uint8_t *out) {
@@ -45,6 +47,8 @@ Reserved slotReserved(uint8_t slot) {
         return Reserved::PsGate;
     if (slotCtrl(slot) == Ctrl::F && m == Mod::L1 && slotBtn(slot) == Btn::L3)
         return Reserved::OverSpeed;
+    if (slotTap(slot) == Tap::DOUBLE && slotBtn(slot) == Btn::L3)
+        return Reserved::Stick;
     return Reserved::No;
 }
 
@@ -64,11 +68,25 @@ bool parseMod(const char *s, Mod *out) {
     return true;
 }
 
-bool parseBtn(const char *s, Btn *out) {
+bool parseBtn(const char *s, Btn *out, Tap *tap) {
     uint8_t i = 0;
-    if (!parseToken(s, kBtnTokens, &i))
+    if (parseToken(s, kBtnTokens, &i)) {
+        *out = static_cast<Btn>(i);
+        if (tap != nullptr)
+            *tap = Tap::SINGLE;
+        return true;
+    }
+    // "UP2": a button token and the double-tap mark.
+    const size_t n = strlen(s);
+    char base[sizeof(kBtnTokens[0])];
+    if (tap == nullptr || n < 2 || n > sizeof(base) || s[n - 1] != '2')
+        return false;
+    memcpy(base, s, n - 1);
+    base[n - 1] = '\0';
+    if (!parseToken(base, kBtnTokens, &i))
         return false;
     *out = static_cast<Btn>(i);
+    *tap = Tap::DOUBLE;
     return true;
 }
 
@@ -81,7 +99,8 @@ uint8_t formatSlot(char *dst, uint8_t cap, uint8_t slot) {
                     appendP(dst, cap, &len, kSpace) &&
                     appendP(dst, cap, &len, kModTokens[static_cast<uint8_t>(slotMod(slot))]) &&
                     appendP(dst, cap, &len, kSpace) &&
-                    appendP(dst, cap, &len, kBtnTokens[static_cast<uint8_t>(slotBtn(slot))]);
+                    appendP(dst, cap, &len, kBtnTokens[static_cast<uint8_t>(slotBtn(slot))]) &&
+                    (slotTap(slot) == Tap::SINGLE || appendP(dst, cap, &len, kDoubleMark));
     if (!ok) {
         dst[0] = '\0';
         return 0;
@@ -95,6 +114,8 @@ const char *reservedToken(Reserved r) {
             return kReservedPsGate;
         case Reserved::OverSpeed:
             return kReservedOverSpeed;
+        case Reserved::Stick:
+            return kReservedStick;
         case Reserved::No:
             break;
     }

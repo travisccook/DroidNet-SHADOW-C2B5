@@ -9,7 +9,7 @@ usage (from the Mac; there's no need to copy the script over):
     ssh root@c2-body.local 'python3 - [--port S2] [--wait SEC] "<VERB args>" ...' < tools/shadowmap/sm_via_api.py
 e.g.
     ... 'python3 - HELLO SUM "GET F L1 UP" "EVENTS 1"' < tools/shadowmap/sm_via_api.py
-    ... 'python3 - --wait 7 DUMP' < tools/shadowmap/sm_via_api.py        # a DUMP takes about 4.4 s
+    ... 'python3 - --wait 12 DUMP' < tools/shadowmap/sm_via_api.py       # a DUMP (144 slots) takes about 9 s
 
 One requester at a time: check that nothing else (DroidNet's SHADOW tab, another session) is using @SM first.
 """

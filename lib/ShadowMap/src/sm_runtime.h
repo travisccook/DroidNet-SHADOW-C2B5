@@ -37,11 +37,14 @@ class Runtime {
     static constexpr uint8_t kAnnounceOverhead = 32;
     static constexpr uint8_t kMaxBytesPerPass = 64;
     static constexpr uint32_t kDeferMaxMs = 250;  // a deferred press older than this is dropped
+    static constexpr uint16_t kDoubleTapMs = 350;  // default window from the first press to the second
 
     // `announceFw` is the firmware version for the WCB device announce ("@WDP1 {...}");
-    // nullptr turns the announce off. It starts with startAnnounce().
-    Runtime(MapStore &store, Protocol &protocol, TxQueue &tx, const char *announceFw)
-        : store_(store), protocol_(protocol), tx_(tx), announceFw_(announceFw) {}
+    // nullptr turns the announce off. It starts with startAnnounce(). `doubleTapMs` is how
+    // soon after the first press a second one has to come to count as a double tap.
+    Runtime(MapStore &store, Protocol &protocol, TxQueue &tx, const char *announceFw,
+            uint16_t doubleTapMs = kDoubleTapMs)
+        : store_(store), protocol_(protocol), tx_(tx), announceFw_(announceFw), doubleTapMs_(doubleTapMs) {}
 
     // Call once at the end of setup(). `seed` varies the announce intervals (any value).
     void startAnnounce(uint32_t nowMs, uint32_t seed);
@@ -59,9 +62,14 @@ class Runtime {
 
     // Once per pass, after the controllers have been read: the dome controller, then the foot,
     // as the old code did. A combo fires when pressed and again every second while held; the
-    // repeat timer is shared by both controllers. Returns true, filling `fired`, when a combo
-    // fired this pass.
+    // repeat timer is shared by both controllers. A combo whose double tap is mapped waits
+    // instead (see WIPDocs/COMMAND_MAPPING_DESIGN.md, Double taps): a second press within
+    // the window fires the double tap, anything else fires the combo itself, late. Returns
+    // true, filling `fired`, when a combo fired this pass.
     bool buttons(uint32_t nowMs, const PadState &foot, const PadState &dome, FiredPress *fired);
+
+    // True while a first tap waits to see whether a second one follows.
+    bool tapPending() const { return taps_[0].pending != kNoSlot || taps_[1].pending != kNoSlot; }
 
     // Reads @SM requests from `port` without blocking, at most kMaxBytesPerPass bytes a pass.
     // A request that can't be answered yet (reply queue full, EEPROM busy) stays in `reader`
@@ -101,7 +109,30 @@ class Runtime {
     }
 
   private:
+    // What the combo held on one controller is doing.
+    enum class Hold : uint8_t {
+        None,     // nothing held
+        Legacy,   // no double tap mapped: fires at once, then every second (the shared timer)
+        Waiting,  // first press of a double-tap combo, still held
+        Repeat,   // held past the window: fired as a single press, repeats every second
+        Latched,  // double tap fired (or a press ignored after one): nothing until released
+    };
+
+    struct PadTaps {
+        uint8_t held = kNoSlot;     // the slot resolved last pass
+        Hold mode = Hold::None;
+        uint8_t pending = kNoSlot;  // a first tap waiting for a second; may be released already
+        bool pendingFromOther = false;
+        uint32_t pendingAt = 0;     // when it was pressed
+        uint32_t lastFire = 0;      // Repeat: when it last fired
+        uint8_t quiet = kNoSlot;    // just double-tapped: presses of it are ignored until
+        uint32_t quietFrom = 0;     //   a second after its first press
+    };
+
     bool handlePad(Ctrl ctrl, const PadState &self, const PadState &other, uint32_t nowMs, FiredPress *fired);
+    bool pressed(PadTaps &t, uint8_t slot, bool fromOther, uint32_t nowMs, FiredPress *fired);
+    bool legacy(uint8_t slot, bool fromOther, uint32_t nowMs, FiredPress *fired);
+    bool fireOrDefer(uint8_t slot, bool modFromOther, uint32_t nowMs, FiredPress *fired);
     bool fire(uint8_t slot, bool modFromOther, FiredPress *fired);
     void announce(uint32_t nowMs);
     void reportBattery(uint32_t nowMs);
@@ -111,7 +142,9 @@ class Runtime {
     Protocol &protocol_;
     TxQueue &tx_;
     const char *announceFw_;
+    uint16_t doubleTapMs_;
 
+    PadTaps taps_[kCtrlCount];
     uint32_t repeatStart_ = 0;
     uint16_t repeatCount_ = 0;
     uint8_t deferredSlot_ = kNoSlot;  // pressed while the EEPROM was mid-write

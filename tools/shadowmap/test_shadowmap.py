@@ -142,6 +142,15 @@ class WcbEmulator(smc.Transport):
     def press(self, foot: int = 0, dome: int = 0, foot_on: bool = True, dome_on: bool = True) -> None:
         self._shadow(f"!!PRESS {foot:x} {dome:x} {int(foot_on)} {int(dome_on)}")
 
+    def hold(self, ms: int, foot: int = 0, dome: int = 0) -> None:
+        self._shadow(f"!!HOLD {foot:x} {dome:x} {ms}")
+
+    def double_tap(self, foot: int = 0, dome: int = 0) -> None:
+        self.hold(40, foot, dome)
+        self.tick(60)
+        self.hold(40, foot, dome)
+        self.tick(1100)  # past the second in which further taps are ignored
+
     def tick(self, ms: int) -> None:
         self._shadow(f"!!TICK {ms}")
 
@@ -177,14 +186,14 @@ class ContractTest(unittest.TestCase):
         return smc.Slot.parse(text)
 
     def test_hello(self):
-        self.assertEqual(1, self.ready.version)
-        self.assertEqual(72, self.ready.slots)
+        self.assertEqual(2, self.ready.version)
+        self.assertEqual(144, self.ready.slots)
         self.assertFalse(self.ready.formatted)
         self.assertEqual("sim", self.ready.fw)
 
     def test_dump_shows_the_built_in_map(self):
         states = {s.slot: s for s in self.client.dump()}
-        self.assertEqual(72, len(states))
+        self.assertEqual(144, len(states))
         s = states[self.slot("F L1 UP")]
         self.assertEqual(("extremehappysou", "default", "extremehappysou"), (s.key, s.source, s.default))
         self.assertEqual("overspeed", states[self.slot("F L1 L3")].reserved)
@@ -194,6 +203,13 @@ class ContractTest(unittest.TestCase):
             self.assertEqual("", states[self.slot(f"F PS {d}")].key)  # brightness removed
             self.assertEqual("", states[self.slot(f"D PS {d}")].key)  # volume removed
         self.assertEqual(35, sum(1 for s in states.values() if s.key))
+        # Double taps: none mapped by default, and none on the stick click.
+        self.assertEqual("", states[self.slot("F L1 UP2")].key)
+        self.assertEqual("", states[self.slot("F L1 UP2")].default)
+        self.assertEqual("stick", states[self.slot("D NONE L32")].reserved)
+        self.assertEqual("overspeed", states[self.slot("F L1 L32")].reserved)
+        self.assertEqual("psgate", states[self.slot("F NONE PS2")].reserved)
+        self.assertIsNone(states[self.slot("F L2 PS2")].reserved)
 
     def test_python_sum_matches_shadow(self):
         self.assertEqual(smc.map_sum(self.client.dump()), self.client.sum())
@@ -213,6 +229,43 @@ class ContractTest(unittest.TestCase):
         self.client.revert(self.slot("F L1 UP"))
         self.wcb.press(foot=UP | L1)
         self.assertEqual(";W1;Cextremehappysou", self.wcb.commands[-1])
+
+    def test_double_tap(self):
+        self.client.set(self.slot("F L1 UP2"), "scream")
+        self.assertEqual(("scream", "eeprom"), (lambda s: (s.key, s.source))(self.client.get(self.slot("F L1 UP2"))))
+        n = len(self.wcb.commands)
+        self.wcb.double_tap(foot=UP | L1)
+        self.assertEqual([";W1;Cscream"], self.wcb.commands[n:])  # only the double tap
+        self.wcb.press(foot=UP | L1)  # one tap: the single press, once the window has passed
+        self.assertEqual([";W1;Cscream", ";W1;Cextremehappysou"], self.wcb.commands[n:])
+        self.client.set(self.slot("F L1 UP2"), "")
+        self.wcb.double_tap(foot=UP | L1)  # unmapped again: the old timing, one command
+        self.assertEqual(";W1;Cextremehappysou", self.wcb.commands[-1])
+        self.assertEqual(3, len(self.wcb.commands) - n)
+        with self.assertRaises(smc.ProtocolError) as e:
+            self.client.set(self.slot("F NONE L32"), "nope")
+        self.assertEqual("reserved", e.exception.code)
+
+    def test_double_tap_survives_reboot_and_defaults(self):
+        self.client.set(self.slot("D CROSS LEFT2"), "GDc2song")
+        self.wcb.reboot()
+        self.client.hello()
+        self.wcb.double_tap(dome=CROSS | LEFT)
+        self.assertEqual(";W1;CGDc2song", self.wcb.commands[-1])
+        self.client.defaults()
+        self.assertEqual(("", "default"), (lambda s: (s.key, s.source))(self.client.get(self.slot("D CROSS LEFT2"))))
+        self.wcb.double_tap(dome=CROSS | LEFT)
+        self.assertEqual(";W1;Cscanning", self.wcb.commands[-1])
+
+    def test_double_tap_event(self):
+        self.client.set(self.slot("F CROSS UP2"), "leiatwice")
+        events = []
+        self.client.on_event = events.append
+        self.client.events(True)
+        self.wcb.double_tap(foot=UP, dome=CROSS)
+        self.client.listen(0.01)
+        press = [e for e in events if e.kind == "PRESS"]
+        self.assertEqual([(self.slot("F CROSS UP2"), "leiatwice", "D")], [(e.slot, e.key, e.from_other) for e in press])
 
     def test_mapping_survives_reboot_and_defaults_resets_it(self):
         self.client.set(self.slot("D CROSS UP"), "GDc2song")
@@ -271,6 +324,8 @@ class ContractTest(unittest.TestCase):
         fresh = self.client.read_map(cached)
         self.assertIsNot(cached, fresh)
         self.assertEqual("mahna", {s.slot: s for s in fresh}[self.slot("D L2 PS")].key)
+        self.client.set(self.slot("D L2 PS2"), "mahna")  # a double tap changes the SUM too
+        self.assertIsNot(fresh, self.client.read_map(fresh))
 
     def test_events(self):
         events = []
@@ -319,7 +374,7 @@ class ContractTest(unittest.TestCase):
         self.wcb.tick(62000)  # two heartbeats (5 s and 35 s) are waiting when the DUMP goes out
         self.assertEqual(2, sum(1 for line in self.wcb.usb if line.startswith("@SM BAT ")))
         dump = self.client.dump()
-        self.assertEqual(72, len(dump))
+        self.assertEqual(144, len(dump))
         self.assertEqual(dump[40], self.client.get(dump[40].slot))
 
     def test_announce(self):
@@ -335,7 +390,7 @@ class RemoteRouteTest(unittest.TestCase):
         wcb = WcbEmulator(os.path.join(tmp, "e.bin"), shadow_port=5, shadow_wcb=2, pi_wcb=4)
         try:
             client = smc.Client(wcb, smc.WcbRoute(shadow_port=5, shadow_wcb=2, pi_wcb=4), timeout=0.05)
-            self.assertEqual(72, client.hello().slots)
+            self.assertEqual(144, client.hello().slots)
             client.set(smc.Slot.parse("F NONE L3"), "scanning")
             self.assertEqual("scanning", client.get(smc.Slot.parse("F NONE L3")).key)
             wcb.press(foot=L3)
@@ -385,7 +440,14 @@ class FramingTest(unittest.TestCase):
     def test_slot_index_matches_firmware(self):
         self.assertEqual(0, smc.Slot.parse("F NONE UP").index)
         self.assertEqual(71, smc.Slot.parse("D CROSS PS").index)
-        self.assertEqual([s.index for s in smc.all_slots()], list(range(72)))
+        self.assertEqual(72, smc.Slot.parse("F NONE UP2").index)
+        self.assertEqual(143, smc.Slot.parse("D CROSS PS2").index)
+        self.assertEqual([s.index for s in smc.all_slots()], list(range(144)))
+        self.assertEqual("D CIRCLE RIGHT2", str(smc.Slot.from_index(smc.Slot.parse("D CIRCLE RIGHT2").index)))
+        with self.assertRaises(ValueError):
+            smc.Slot.parse("F L1 UP3")
+        with self.assertRaises(ValueError):
+            smc.Slot.parse("F L1 CROSS2")
 
 
 if __name__ == "__main__":
