@@ -10,7 +10,7 @@ namespace sm {
 
 namespace {
 
-constexpr uint8_t kProtocolVersion = 1;
+constexpr uint8_t kProtocolVersion = 2;  // 2: double-tap slots
 constexpr uint8_t kMaxRouteLen = 8;  // ";W20,;S0"
 constexpr uint8_t kMaxArgs = 7;
 
@@ -68,7 +68,7 @@ class Out {
     }
     Out &key(const char *k) { return *k == '\0' ? c('-') : s(k); }
     Out &slot(uint8_t slot) {
-        char tmp[16];
+        char tmp[kSlotTextBuf];
         if (formatSlot(tmp, sizeof(tmp), slot) == 0)
             overflow_ = true;
         return s(tmp);
@@ -170,9 +170,10 @@ bool parseSlotArgs(char *const *argv, uint8_t *slot) {
     Ctrl c;
     Mod m;
     Btn b;
-    if (!parseCtrl(argv[0], &c) || !parseMod(argv[1], &m) || !parseBtn(argv[2], &b))
+    Tap t;
+    if (!parseCtrl(argv[0], &c) || !parseMod(argv[1], &m) || !parseBtn(argv[2], &b, &t))
         return false;
-    *slot = slotIndex(c, m, b);
+    *slot = slotIndex(c, m, b, t);
     return true;
 }
 

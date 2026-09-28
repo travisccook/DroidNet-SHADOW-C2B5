@@ -10,11 +10,32 @@
 // calls to tick(). Touching it while busy counts as a violation (the store must never do
 // that). `budget` simulates a power cut: once it reaches zero, writes stop landing, and
 // with `cutGarbage` the last write lands as garbage, like a write cut off by a brown-out.
+//
+// The headers and single-press slots are backed byte for byte (`mem`). The double-tap slots
+// after them read as erased until written; a written record takes one of kPoolRecords, so a
+// test can use a handful of double-tap slots without the whole bank in SRAM (the emulated Mega
+// has 8 KB). Writing more than that counts as a violation.
 class FakeEeprom final : public sm::EepromIo {
   public:
     static constexpr uint16_t kSize = sm::MapStore::kFootprint;
+    static constexpr uint16_t kFlat = 2 * sm::MapStore::kHeaderSize + sm::kSingleSlotCount * sm::MapStore::kSlotSize;
+    static constexpr uint8_t kPoolRecords = 6;
 
-    FakeEeprom() { memset(mem, 0xFF, sizeof(mem)); }
+    FakeEeprom() { erase(); }
+
+    // Back to a fresh, erased EEPROM, in place: a temporary FakeEeprom would put another
+    // copy of `mem` on the stack, which the emulated Mega can't spare.
+    void reset() {
+        erase();
+        busy = 0;
+        writeTicks = 3;
+        budget = -1;
+        cutGarbage = false;
+        stuckAddr = -1;
+        writes = 0;
+        reads = 0;
+        violations = 0;
+    }
 
     bool ready() override { return busy == 0; }
     uint8_t read(uint16_t addr) override {
@@ -23,7 +44,7 @@ class FakeEeprom final : public sm::EepromIo {
             return 0xFF;
         }
         ++reads;
-        uint8_t v = mem[addr];
+        uint8_t v = peek(addr);
         if (static_cast<int32_t>(addr) == stuckAddr)
             v ^= 0x01;
         return v;
@@ -36,14 +57,19 @@ class FakeEeprom final : public sm::EepromIo {
         ++writes;
         if (budget == 0)
             return;  // no power: nothing lands
+        uint8_t *cell = cellFor(addr);
+        if (cell == nullptr) {
+            ++violations;  // more double-tap records than the pool holds: raise kPoolRecords
+            return;
+        }
         if (budget > 0) {
             --budget;
             if (budget == 0 && cutGarbage) {
-                mem[addr] = static_cast<uint8_t>(value ^ 0xA5);
+                *cell = static_cast<uint8_t>(value ^ 0xA5);
                 return;
             }
         }
-        mem[addr] = value;
+        *cell = value;
         busy = writeTicks;
     }
     void tick() {
@@ -56,7 +82,21 @@ class FakeEeprom final : public sm::EepromIo {
         budget = -1;
     }
 
-    uint8_t mem[kSize];
+    // What's stored at `addr`, without the checks a read makes.
+    uint8_t peek(uint16_t addr) const {
+        if (addr < kFlat)
+            return mem[addr];
+        const Record *r = find(recordOf(addr));
+        return r != nullptr ? r->bytes[(addr - kFlat) % sm::MapStore::kSlotSize] : 0xFF;
+    }
+    uint8_t doubleRecordsUsed() const {
+        uint8_t n = 0;
+        for (const Record &r : pool)
+            n = static_cast<uint8_t>(n + (r.record != kFree ? 1 : 0));
+        return n;
+    }
+
+    uint8_t mem[kFlat];  // headers and single-press slots
     uint8_t busy = 0;
     uint8_t writeTicks = 3;
     int32_t budget = -1;  // writes left before the power cut; -1 = no cut
@@ -65,6 +105,43 @@ class FakeEeprom final : public sm::EepromIo {
     uint32_t writes = 0;
     uint32_t reads = 0;
     uint32_t violations = 0;
+
+  private:
+    static constexpr uint8_t kFree = 0xFF;
+    struct Record {
+        uint8_t record;  // which double-tap record (0-71), or kFree
+        uint8_t bytes[sm::MapStore::kSlotSize];
+    };
+
+    static uint8_t recordOf(uint16_t addr) { return static_cast<uint8_t>((addr - kFlat) / sm::MapStore::kSlotSize); }
+    const Record *find(uint8_t record) const {
+        for (const Record &r : pool) {
+            if (r.record == record)
+                return &r;
+        }
+        return nullptr;
+    }
+    uint8_t *cellFor(uint16_t addr) {
+        if (addr < kFlat)
+            return &mem[addr];
+        const uint8_t record = recordOf(addr);
+        Record *r = const_cast<Record *>(find(record));
+        for (uint8_t i = 0; r == nullptr && i < kPoolRecords; ++i) {
+            if (pool[i].record == kFree) {
+                r = &pool[i];
+                r->record = record;
+                memset(r->bytes, 0xFF, sizeof(r->bytes));
+            }
+        }
+        return r != nullptr ? &r->bytes[(addr - kFlat) % sm::MapStore::kSlotSize] : nullptr;
+    }
+    void erase() {
+        memset(mem, 0xFF, sizeof(mem));
+        for (Record &r : pool)
+            r.record = kFree;
+    }
+
+    Record pool[kPoolRecords];
 };
 
 // Remembers the last few lines seen.

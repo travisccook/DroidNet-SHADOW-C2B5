@@ -6,7 +6,11 @@
 // would write to Serial1. Lines starting with "!!" are simulator controls, not serial data:
 //
 //   !!PRESS <foot-mask> <dome-mask> [<foot-connected> <dome-connected>]
-//                         hold these buttons (HeldBit masks, hex) for one press
+//                         hold these buttons (HeldBit masks, hex) for one press, let a
+//                         double-tap window run out, then skip past the repeat second
+//   !!HOLD <foot-mask> <dome-mask> <ms>
+//                         hold these buttons for <ms>, then let go (no time skipped, so
+//                         two HOLDs with a TICK between are a double tap)
 //   !!TICK <ms>           let time pass with nothing held
 //   !!BATT <foot> <dome>  the controllers' battery status bytes from now on (hex, 0 = none)
 //   !!CUT <writes>        power fails after that many more EEPROM byte writes
@@ -133,7 +137,8 @@ void pass(Shadow &s, FileEeprom &eeprom, StdoutUart &uart, InputQueue &in, sm::P
 
 bool busy(Shadow &s, InputQueue &in, const StdoutUart &uart) {
     return !in.empty() || s.reader.ready() || s.store.busy() || s.protocol.opInProgress() || s.tx.used() > 0 ||
-           uart.room < 63;  // still clocking bytes out of the UART
+           uart.room < 63;  // still clocking bytes out of the UART (a first tap waiting for a
+                            // second isn't work: TICK lets the window run out)
 }
 
 }  // namespace
@@ -163,7 +168,16 @@ int main(int argc, char **argv) {
                 pass(*shadow, eeprom, uart, in, foot, dome);
                 foot.held = 0;
                 dome.held = 0;
+                for (int i = 0; i < 1000 && shadow->runtime.tapPending(); ++i)
+                    pass(*shadow, eeprom, uart, in, foot, dome);
                 now += sm::Runtime::kRepeatMs + 1;  // so the next press isn't inside the repeat window
+            } else if (sscanf(line.c_str(), "!!HOLD %x %x %ld", &footMask, &domeMask, &n) == 3) {
+                foot.held = static_cast<uint16_t>(footMask);
+                dome.held = static_cast<uint16_t>(domeMask);
+                for (long t = 0; t < n; t += kPassMs)
+                    pass(*shadow, eeprom, uart, in, foot, dome);
+                foot.held = 0;
+                dome.held = 0;
             } else if (sscanf(line.c_str(), "!!TICK %ld", &n) == 1) {
                 for (long t = 0; t < n; t += kPassMs)
                     pass(*shadow, eeprom, uart, in, foot, dome);

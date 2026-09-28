@@ -1,10 +1,14 @@
 // EEPROM-backed mapping store.
 //
-// Layout, from `base` (1360 bytes in all):
+// Layout, from `base` (2656 bytes in all):
 //   header A (32 B), header B (32 B)   magic "SM", layout version, slot count, sequence,
 //                                      generation, command prefix/suffix, CRC16
-//   72 slots x 18 B                    stored-command key (NUL-padded) + CRC16 over
+//   144 slots x 18 B                   stored-command key (NUL-padded) + CRC16 over
 //                                      (layout version, generation, slot index, key)
+//
+// The 72 double-tap slots (72-143) follow the 72 single-press slots, which end at 1360. The
+// header's slot count stays 72, the single-press slots, so firmware from before double taps
+// reads the same EEPROM and keeps its mappings; it never touches the double-tap slots.
 //
 // Headers are written alternately and the valid one with the newer sequence wins, so a
 // power cut while a header is being written leaves the previous one in force. Each slot
@@ -74,6 +78,11 @@ class MapStore {
     bool keyForSlot(uint8_t slot, char out[kKeyBuf], Source *src = nullptr);
     void defaultKey(uint8_t slot, char out[kKeyBuf]) const;
 
+    // Whether the double tap of `slot` (either its single-press or its double-tap index) maps
+    // to a key. Kept in RAM, so it never waits on the EEPROM; a write changes it once it's
+    // done.
+    bool doubleTapMapped(uint8_t slot) const;
+
     // Start a write. Only one runs at a time; watch takeCompletion() for the outcome.
     Result beginSet(uint8_t slot, const char *key);  // "" clears the slot
     Result beginRevert(uint8_t slot);                // back to the built-in default
@@ -109,6 +118,10 @@ class MapStore {
     void applyHeader(const uint8_t *hdr, uint8_t index);
     bool readSlotRecord(uint8_t slot, uint8_t rec[kSlotSize]);
     Result beginHeaderChange(uint16_t gen, const char *prefix, const char *suffix);
+    bool defaultMapped(uint8_t slot) const;
+    void setDoubleTapMapped(uint8_t slot, bool mapped);
+    void loadDoubleTapDefaults();
+    void loadDoubleTap(uint8_t slot);  // from its EEPROM record; the EEPROM must be ready
 
     EepromIo &io_;
     const DefaultMapping *defaults_;
@@ -135,6 +148,7 @@ class MapStore {
 
     bool readWanted_ = false;
     Completion completion_ = Completion::None;
+    uint8_t doubleTaps_[(kSingleSlotCount + 7) / 8] = {};  // bit per double-tap slot that maps to a key
     uint16_t writes_ = 0;
 };
 

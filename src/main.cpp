@@ -217,9 +217,10 @@ static_assert(sizeof(SHADOW_FW_VERSION) <= 12, "SHADOW_FW_VERSION is longer than
 #ifdef SHADOW_WDP_ANNOUNCE
 // The announce line has to fit the 64-byte Serial1 TX buffer in one go.
 static_assert(sm::Runtime::kAnnounceOverhead + sizeof(SHADOW_FW_VERSION) - 1 <= 63, "WCB announce line too long");
-sm::Runtime mapRuntime(mapStore, mapProtocol, wcbTx, SHADOW_FW_VERSION);  // announces every 25-30 s
+sm::Runtime mapRuntime(mapStore, mapProtocol, wcbTx, SHADOW_FW_VERSION,
+                       SHADOW_DOUBLE_TAP_MS);  // announces every 25-30 s
 #else
-sm::Runtime mapRuntime(mapStore, mapProtocol, wcbTx, nullptr);
+sm::Runtime mapRuntime(mapStore, mapProtocol, wcbTx, nullptr, SHADOW_DOUBLE_TAP_MS);
 #endif
 
 // The buttons that matter for the mapping, as a bitmask.
@@ -253,14 +254,14 @@ sm::PadState padState(PS3BT *pad) {
     return {connected, connected ? heldButtons(pad) : static_cast<uint16_t>(0)};
 }
 
-// Button combos to WCB stored commands (see sm::Runtime for the repeat timing).
+// Button combos to WCB stored commands (see sm::Runtime for the repeat and double-tap timing).
 void mappedButtons() {
     sm::FiredPress fired;
     if (!mapRuntime.buttons(millis(), padState(PS3NavFoot), padState(PS3NavDome), &fired))
         return;
 
 #ifdef SHADOW_VERBOSE
-    char name[16];
+    char name[sm::kSlotTextBuf];
     sm::formatSlot(name, sizeof(name), fired.slot);
     output += "ACTIVATED: ";
     output += name;

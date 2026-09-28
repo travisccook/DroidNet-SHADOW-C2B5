@@ -36,6 +36,11 @@
 // with "@SM BAT".
 #define SHADOW_BATTERY_REPORT
 
+// Double taps: how soon (ms) after the first press of a combo the second press has to come.
+// Only combos with a double tap mapped wait for it, so their single press fires this much
+// later; every other combo fires at once, as always.
+#define SHADOW_DOUBLE_TAP_MS 350
+
 // ---------------------------------------------------------------------------------------
 //                          PS3 Controller MAC Addresses
 // ---------------------------------------------------------------------------------------

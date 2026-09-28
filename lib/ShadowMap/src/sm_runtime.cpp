@@ -26,9 +26,81 @@ bool Runtime::buttons(uint32_t nowMs, const PadState &foot, const PadState &dome
 }
 
 bool Runtime::handlePad(Ctrl ctrl, const PadState &self, const PadState &other, uint32_t nowMs, FiredPress *fired) {
-    if (!self.connected || !gateOpen(self.held))
+    PadTaps &t = taps_[static_cast<uint8_t>(ctrl)];
+    if (!self.connected) {
+        t = PadTaps();  // a controller that drops loses a half-finished double tap
         return false;
+    }
+    bool fromOther = false;
+    const uint8_t slot = gateOpen(self.held) ? resolveSlot(ctrl, self, other, &fromOther) : kNoSlot;
 
+    bool any = false;
+    if (t.pending != kNoSlot && nowMs - t.pendingAt >= doubleTapMs_) {
+        // No second press in time: it was a single press. Checked before this pass's press,
+        // which is too late to be the second tap.
+        const uint8_t first = t.pending;
+        t.pending = kNoSlot;
+        if (nowMs - t.pendingAt > doubleTapMs_ + kDeferMaxMs) {
+            if (t.mode == Hold::Waiting)  // passes were held up (a fault): too late to mean anything
+                t.mode = Hold::Latched;
+        } else {
+            any = fireOrDefer(first, t.pendingFromOther, nowMs, fired);
+            if (t.mode == Hold::Waiting) {
+                t.mode = Hold::Repeat;
+                t.lastFire = nowMs;
+            }
+        }
+    }
+
+    if (slot != t.held) {
+        any = pressed(t, slot, fromOther, nowMs, fired) || any;
+        t.held = slot;
+    }
+
+    if (t.mode == Hold::Repeat && nowMs - t.lastFire > kRepeatMs) {
+        t.lastFire = nowMs;
+        any = fireOrDefer(slot, fromOther, nowMs, fired) || any;
+    } else if (t.mode == Hold::Legacy) {
+        any = legacy(slot, fromOther, nowMs, fired) || any;
+    }
+    return any;
+}
+
+// The held combo changed: pressed, released, or turned into another combo.
+bool Runtime::pressed(PadTaps &t, uint8_t slot, bool fromOther, uint32_t nowMs, FiredPress *fired) {
+    bool any = false;
+    if (t.pending != kNoSlot && slot != kNoSlot) {
+        if (slot == t.pending) {
+            t.pending = kNoSlot;
+            t.mode = Hold::Latched;  // no repeat for a held double tap
+            t.quiet = slot;
+            t.quietFrom = t.pendingAt;
+            return fireOrDefer(doubleOf(slot), fromOther, nowMs, fired);
+        }
+        // Another combo: the first one was a single press.
+        any = fireOrDefer(t.pending, t.pendingFromOther, nowMs, fired);
+        t.pending = kNoSlot;
+    }
+
+    if (slot == kNoSlot) {
+        t.mode = Hold::None;
+    } else if (!store_.doubleTapMapped(slot)) {
+        t.mode = Hold::Legacy;
+    } else if (slot == t.quiet && nowMs - t.quietFrom <= kRepeatMs) {
+        t.mode = Hold::Latched;  // a third tap right after a double tap
+    } else {
+        t.mode = Hold::Waiting;
+        t.pending = slot;
+        t.pendingFromOther = fromOther;
+        t.pendingAt = nowMs;
+    }
+    return any;
+}
+
+// The original timing: fires when pressed and again every second while held. The timer is
+// shared by both controllers and doesn't reset on release, so taps inside the same second
+// are ignored.
+bool Runtime::legacy(uint8_t slot, bool fromOther, uint32_t nowMs, FiredPress *fired) {
     if (nowMs - repeatStart_ > kRepeatMs) {
         repeatCount_ = 0;
         repeatStart_ = nowMs;
@@ -37,18 +109,16 @@ bool Runtime::handlePad(Ctrl ctrl, const PadState &self, const PadState &other, 
         ++repeatCount_;
     if (repeatCount_ != 1)
         return false;
+    return fireOrDefer(slot, fromOther, nowMs, fired);
+}
 
-    bool fromOther = false;
-    const uint8_t slot = resolveSlot(ctrl, self, other, &fromOther);
-    if (slot == kNoSlot)
-        return false;
-    if (!fire(slot, fromOther, fired)) {
-        deferredSlot_ = slot;  // EEPROM mid-write: send it next pass
-        deferredFromOther_ = fromOther;
-        deferredAt_ = nowMs;
-        return false;
-    }
-    return true;
+bool Runtime::fireOrDefer(uint8_t slot, bool modFromOther, uint32_t nowMs, FiredPress *fired) {
+    if (fire(slot, modFromOther, fired))
+        return true;
+    deferredSlot_ = slot;  // EEPROM mid-write: send it next pass
+    deferredFromOther_ = modFromOther;
+    deferredAt_ = nowMs;
+    return false;
 }
 
 bool Runtime::fire(uint8_t slot, bool modFromOther, FiredPress *fired) {
