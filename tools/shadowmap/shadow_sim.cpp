@@ -9,7 +9,8 @@
 //                         hold these buttons (HeldBit masks, hex) for one press, let a
 //                         double-tap window run out, then skip past the repeat second
 //   !!HOLD <foot-mask> <dome-mask> <ms>
-//                         hold these buttons for <ms>, then let go (no time skipped, so
+//                         hold these buttons for <ms>, then let go (hold 600 ms or more for a
+//                         long press; no time skipped, so
 //                         two HOLDs with a TICK between are a double tap)
 //   !!TICK <ms>           let time pass with nothing held
 //   !!BATT <foot> <dome>  the controllers' battery status bytes from now on (hex, 0 = none)

@@ -18,6 +18,7 @@ Command line:
     shadowmap.py --wcb /dev/ttyUSB0 --shadow-port 3 dump
     shadowmap.py --wcb /dev/ttyUSB0 --shadow-port 3 set F L1 UP scream
     shadowmap.py --wcb /dev/ttyUSB0 --shadow-port 3 set F L1 UP2 scream   (UP2 = UP tapped twice)
+    shadowmap.py --wcb /dev/ttyUSB0 --shadow-port 3 set F L1 UPL quiet   (UPL = UP held for a long press)
     shadowmap.py --usb /dev/ttyACM0 get F L1 UP        (resets the Mega when it opens the port)
     shadowmap.py --wcb /dev/ttyUSB0 --shadow-port 3 battery
 
@@ -37,9 +38,11 @@ from typing import Callable, Dict, Iterable, List, Optional, Tuple
 CONTROLLERS = ("F", "D")
 MODIFIERS = ("NONE", "L1", "L2", "PS", "CIRCLE", "CROSS")
 BUTTONS = ("UP", "RIGHT", "DOWN", "LEFT", "L3", "PS")
-PROTOCOL_VERSION = 2  # v2 added the double-tap slots
-SINGLE_SLOTS = 72  # 0-71 single presses; 72-143 the same combos tapped twice
-SLOT_COUNT = 2 * SINGLE_SLOTS
+PROTOCOL_VERSION = 3  # v2 added the double-tap slots, v3 the long presses
+SINGLE_SLOTS = 72  # 0-71 single presses; 72-143 tapped twice; 144-215 held
+TAPS = (1, 2, 3)  # single, double tap, long press
+TAP_MARK = {1: "", 2: "2", 3: "L"}
+SLOT_COUNT = len(TAPS) * SINGLE_SLOTS
 KEY_RE = re.compile(r"^[A-Za-z0-9_]{1,15}$")
 FORBIDDEN = ("^",)  # the WCB splits commands on it
 
@@ -96,38 +99,43 @@ class Slot:
     ctl: str  # F or D
     mod: str  # NONE L1 L2 PS CIRCLE CROSS
     btn: str  # UP RIGHT DOWN LEFT L3 PS
-    double: bool = False  # the button tapped twice; written "UP2" on the wire
+    tap: int = 1  # 1 single, 2 double tap ("UP2" on the wire), 3 long press ("UPL")
 
     def __post_init__(self):
         if self.ctl not in CONTROLLERS or self.mod not in MODIFIERS or self.btn not in BUTTONS:
             raise ValueError(f"bad slot {self.ctl} {self.mod} {self.btn}")
+        if isinstance(self.tap, bool) or self.tap not in TAPS:
+            raise ValueError(f"tap is 1, 2 or 3, got {self.tap!r}")
 
     @property
     def index(self) -> int:
         single = CONTROLLERS.index(self.ctl) * 36 + MODIFIERS.index(self.mod) * 6 + BUTTONS.index(self.btn)
-        return single + SINGLE_SLOTS if self.double else single
+        return single + (self.tap - 1) * SINGLE_SLOTS
 
     @classmethod
     def from_index(cls, i: int) -> "Slot":
         j = i % SINGLE_SLOTS
-        return cls(CONTROLLERS[j // 36], MODIFIERS[(j % 36) // 6], BUTTONS[j % 6], i >= SINGLE_SLOTS)
+        return cls(CONTROLLERS[j // 36], MODIFIERS[(j % 36) // 6], BUTTONS[j % 6], i // SINGLE_SLOTS + 1)
 
     @classmethod
     def from_tokens(cls, ctl: str, mod: str, btn: str) -> "Slot":
-        """The three wire tokens, e.g. ("F", "L1", "UP2")."""
-        if btn.endswith("2") and btn[:-1] in BUTTONS:
-            return cls(ctl, mod, btn[:-1], True)
-        return cls(ctl, mod, btn)
+        """The three wire tokens, e.g. ("F", "L1", "UP2") or ("F", "L1", "UPL")."""
+        if btn in BUTTONS:
+            return cls(ctl, mod, btn)
+        for tap, mark in TAP_MARK.items():
+            if mark and btn.endswith(mark) and btn[: -len(mark)] in BUTTONS:
+                return cls(ctl, mod, btn[: -len(mark)], tap)
+        raise ValueError(f"bad button {btn!r}")
 
     @classmethod
     def parse(cls, text: str) -> "Slot":
         parts = text.replace(".", " ").split()
         if len(parts) != 3:
-            raise ValueError(f"slot is 'F L1 UP' (or 'F L1 UP2' for a double tap), got {text!r}")
+            raise ValueError(f"slot is 'F L1 UP' ('UP2' double tap, 'UPL' long press), got {text!r}")
         return cls.from_tokens(*parts)
 
     def __str__(self) -> str:
-        return f"{self.ctl} {self.mod} {self.btn}{'2' if self.double else ''}"
+        return f"{self.ctl} {self.mod} {self.btn}{TAP_MARK[self.tap]}"
 
 
 def all_slots() -> List[Slot]:

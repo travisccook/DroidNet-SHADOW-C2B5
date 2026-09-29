@@ -186,14 +186,14 @@ class ContractTest(unittest.TestCase):
         return smc.Slot.parse(text)
 
     def test_hello(self):
-        self.assertEqual(2, self.ready.version)
-        self.assertEqual(144, self.ready.slots)
+        self.assertEqual(3, self.ready.version)
+        self.assertEqual(216, self.ready.slots)
         self.assertFalse(self.ready.formatted)
         self.assertEqual("sim", self.ready.fw)
 
     def test_dump_shows_the_built_in_map(self):
         states = {s.slot: s for s in self.client.dump()}
-        self.assertEqual(144, len(states))
+        self.assertEqual(216, len(states))
         s = states[self.slot("F L1 UP")]
         self.assertEqual(("extremehappysou", "default", "extremehappysou"), (s.key, s.source, s.default))
         self.assertEqual("overspeed", states[self.slot("F L1 L3")].reserved)
@@ -245,6 +245,10 @@ class ContractTest(unittest.TestCase):
         with self.assertRaises(smc.ProtocolError) as e:
             self.client.set(self.slot("F NONE L32"), "nope")
         self.assertEqual("reserved", e.exception.code)
+
+    def test_long_press_slot_round_trip(self):
+        self.client.set(self.slot("F L1 UPL"), "quiet")
+        self.assertEqual(("quiet", "eeprom"), (lambda s: (s.key, s.source))(self.client.get(self.slot("F L1 UPL"))))
 
     def test_double_tap_survives_reboot_and_defaults(self):
         self.client.set(self.slot("D CROSS LEFT2"), "GDc2song")
@@ -374,7 +378,7 @@ class ContractTest(unittest.TestCase):
         self.wcb.tick(62000)  # two heartbeats (5 s and 35 s) are waiting when the DUMP goes out
         self.assertEqual(2, sum(1 for line in self.wcb.usb if line.startswith("@SM BAT ")))
         dump = self.client.dump()
-        self.assertEqual(144, len(dump))
+        self.assertEqual(216, len(dump))
         self.assertEqual(dump[40], self.client.get(dump[40].slot))
 
     def test_announce(self):
@@ -390,7 +394,7 @@ class RemoteRouteTest(unittest.TestCase):
         wcb = WcbEmulator(os.path.join(tmp, "e.bin"), shadow_port=5, shadow_wcb=2, pi_wcb=4)
         try:
             client = smc.Client(wcb, smc.WcbRoute(shadow_port=5, shadow_wcb=2, pi_wcb=4), timeout=0.05)
-            self.assertEqual(144, client.hello().slots)
+            self.assertEqual(216, client.hello().slots)
             client.set(smc.Slot.parse("F NONE L3"), "scanning")
             self.assertEqual("scanning", client.get(smc.Slot.parse("F NONE L3")).key)
             wcb.press(foot=L3)
@@ -442,7 +446,12 @@ class FramingTest(unittest.TestCase):
         self.assertEqual(71, smc.Slot.parse("D CROSS PS").index)
         self.assertEqual(72, smc.Slot.parse("F NONE UP2").index)
         self.assertEqual(143, smc.Slot.parse("D CROSS PS2").index)
-        self.assertEqual([s.index for s in smc.all_slots()], list(range(144)))
+        self.assertEqual(144, smc.Slot.parse("F NONE UPL").index)
+        self.assertEqual("F L1 UPL", str(smc.Slot.parse("F.L1.UPL")))
+        self.assertEqual(3, smc.Slot.from_index(215).tap)
+        with self.assertRaises(ValueError):
+            smc.Slot("F", "L1", "UP", True)  # tap is 1, 2 or 3, never a bool
+        self.assertEqual([s.index for s in smc.all_slots()], list(range(216)))
         self.assertEqual("D CIRCLE RIGHT2", str(smc.Slot.from_index(smc.Slot.parse("D CIRCLE RIGHT2").index)))
         with self.assertRaises(ValueError):
             smc.Slot.parse("F L1 UP3")

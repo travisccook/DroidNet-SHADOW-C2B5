@@ -17,6 +17,8 @@ DroidNetSignalBooster repo: [backend design](https://github.com/travisccook/Droi
   bytes as before.
 - **Every combo can also be double-tapped** (except the stick click, L3) and map to a second
   stored command (see [Double taps](#double-taps)).
+- **Every combo can also be held** for a long press (except L3) and map to a third stored
+  command (see [Long presses](#long-presses)).
 - **Where the mappings live:**
   - The built-in defaults are in `src/default_mappings.cpp`.
   - DroidNet can change any combo at runtime, over the WCB link, with the controllers connected.
@@ -78,11 +80,12 @@ WCB references are to `travisccook/Wireless_Communication_Board-WCB` `main` at `
 ## Slots
 
 The mapping is a fixed grid: `index = tap*72 + controller*36 + modifier*6 + button`, which gives
-144 slots: 0-71 are single presses, 72-143 the same combos tapped twice.
+216 slots: 0-71 are single presses, 72-143 the same combos tapped twice, 144-215 the same combos
+held for a long press.
 
 - Controllers: `F` (foot), `D` (dome)
 - Modifiers: `NONE L1 L2 PS CIRCLE CROSS`
-- Buttons: `UP RIGHT DOWN LEFT L3 PS`, and `UP2 RIGHT2 DOWN2 LEFT2 L32 PS2` for a double tap
+- Buttons: `UP RIGHT DOWN LEFT L3 PS`, and `UP2 RIGHT2 DOWN2 LEFT2 L32 PS2` for a double tap, `UPL RIGHTL DOWNL LEFTL L3L PSL` for a long press
 
 **Which slot a press uses:**
 
@@ -141,6 +144,48 @@ The rest:
   loaded at boot and updated when a write finishes. A press never waits on the EEPROM to find
   out.
 
+### Long presses
+
+Added 2026-09-29. Design: DroidNet's
+[spec](https://github.com/travisccook/DroidNetSignalBooster/blob/main/docs/superpowers/specs/2026-09-29-shadow-long-press-design.md).
+A long press is a combo held for `SHADOW_LONG_PRESS_MS` (600 ms, `include/config.h`). A combo whose
+long press is mapped waits, and starts its timer from the press:
+
+| What happens next | What fires |
+| --- | --- |
+| Still held at 0.6 s | The long press, at once. Then nothing until release (`Latched`). |
+| Released before 0.6 s, no double tap mapped | The single tap, on release. |
+| Released before 0.35 s, double tap mapped, second press in time | The double tap, on the second press (exactly as before). |
+| Released before 0.35 s, double tap mapped, no second press | The single tap, when the window closes (as before). |
+| Released between 0.35 s and 0.6 s, double tap mapped | The single tap, on release (the window has already closed). |
+| Another combo pressed on the same controller while it waits | The waiting combo's single tap, at once; the new combo is handled on its own. |
+| The controller drops while it waits | Nothing: the press is dropped (as before). |
+
+- **The long press only fires if the combo is still held on the pass that reaches the threshold.**
+  A release, or another combo, seen first on that pass gives the single press instead.
+- **The double-tap window no longer fires a held first press.** Before, a first press still held
+  when the window closed fired its single tap and then repeated. With a long press mapped, a held
+  first press keeps waiting for either the release or the threshold.
+- **A long press only ever comes from the first press.** Tap, then tap and hold: the double tap
+  fires on the second press, and holding it does nothing more.
+- **Taps right after a long press** are ordinary presses. The one-second quiet period after a
+  double tap stays as it is and doesn't apply to long presses.
+- **Pressing a modifier just after the button** (UP, then L1) fires the plain combo's single tap
+  when the modifier lands, as for a double-tap combo. The new combo starts its own wait.
+- **Stale presses.** A pass held up by a controller fault must not fire a long or single press
+  late: one whose moment (the threshold, the release, or the window's close, whichever it waited
+  for) passed more than 250 ms (`kDeferMaxMs`) before the next pass is dropped. For the long press
+  that is threshold + 250 ms. The check counts from that moment, not from the press: a single tap
+  released at 0.5 s is fresh, although the press is 0.5 s old.
+- **Whether a combo has a long press** comes from a RAM copy (9 bytes, one bit per slot), loaded
+  at boot and updated when a write finishes, like the double taps' copy. A press never waits on
+  the EEPROM.
+- **Limit: stalled reports.** SHADOW reads the held state from the controller's reports. If
+  Bluetooth reports stall for about 500 ms or more during a short tap on a long-press combo, the
+  last "held" report stands and the tap reads as a hold, so the long press fires. No firmware can
+  tell those apart.
+- **No long press on L3,** the stick click (`res=stick`).
+
 **Reserved slots** are hardcoded in `main.cpp` or never reach the mapping. They can't be
 mapped, and `SLOT` lines say why:
 
@@ -149,17 +194,18 @@ mapped, and `SLOT` lines say why:
 | `PS` + `NONE` / `PS` / `CIRCLE` / `CROSS`, both controllers | `psgate` | PS is only a button with L1/L2 held. PS+CROSS and PS+CIRCLE toggle the drive stick. |
 | `F L1 L3` | `overspeed` | Over-speed toggle |
 | every `L32` (double tap of L3) | `stick` | The stick click has no double tap |
+| every `L3L` (long press of L3) | `stick` | The stick click has no long press |
 
 The double tap of a reserved slot is reserved for the same reason (`F L1 L32` is `overspeed`).
-That leaves 31 foot slots and 32 dome slots for single presses, and 26 on each controller for
-double taps.
+The long press of a reserved slot is reserved too. That leaves 31 foot slots and 32 dome slots
+for single presses, and 26 on each controller for double taps and for long presses.
 
 **Fixed along the way:** L3+L1 on the *dome* controller used to toggle foot over-speed as well
 as firing Front Holo Center. Over-speed now only listens to the foot controller.
 
 ## EEPROM layout
 
-The layout uses 2656 of the 4096 bytes. Nothing else uses EEPROM.
+The layout uses 3952 of the 4096 bytes. Nothing else uses EEPROM.
 
 ```
 0x000  header A  32 B   magic "SM", layout version, slot count, sequence, generation,
@@ -167,7 +213,8 @@ The layout uses 2656 of the 4096 bytes. Nothing else uses EEPROM.
 0x040  72 slots x 18 B  single presses: key (<= 15 chars, NUL-padded; "" = unmapped) +
                         CRC16 over (layout version, generation, slot index, key)
 0x550  72 slots x 18 B  double taps (slot index 72-143), the same records
-0xA60  free
+0xA60  72 slots x 18 B  long presses (slot index 144-215), the same records
+0xF70  free
 ```
 
 - **Double taps came later, without a new layout.** The header still says layout version 1 and
@@ -175,6 +222,11 @@ The layout uses 2656 of the 4096 bytes. Nothing else uses EEPROM.
   before double taps still reads the same EEPROM (it never looks past 0x550). Double-tap slots
   read as blank, which is unmapped, until DroidNet sets one. A DEFAULTS from either firmware
   clears both banks, because the generation is in every slot's CRC.
+
+- **Long presses came later, without a new layout.** As with double taps, the header still says
+  layout version 1 and slot count 72, so custom mappings survive the upgrade, and older firmware
+  still reads the same EEPROM (v1 stops at 0x550, v2 at 0xA60). Long-press slots read as blank,
+  which is unmapped, until DroidNet sets one. A DEFAULTS from any firmware clears all three banks.
 
 - **Two header copies.** Headers are written alternately, and the valid one with the newer
   sequence wins (wraparound-safe). A power cut mid-header-write leaves the other copy in force.
@@ -191,11 +243,13 @@ The layout uses 2656 of the 4096 bytes. Nothing else uses EEPROM.
 - **Firmware uploads keep it.** Bootloader uploads don't erase EEPROM (`avrdude -D`, PlatformIO).
   A future firmware with a new layout version falls back to defaults.
 
-## Protocol reference (v2)
+## Protocol reference (v3)
 
 v2 added the double-tap slots: `slots=144`, 144 lines in a DUMP, and button tokens like `UP2`.
-Nothing else changed. A v1 client refuses a v2 SHADOW at HELLO. DroidNet speaks both (it only shows
-double taps to a v2 SHADOW); the reference client (`tools/shadowmap/`) speaks v2 only.
+v3 adds the long-press slots: `slots=216`, 216 lines in a DUMP, and `UPL` tokens. Nothing else
+changed. A v1 or v2 client refuses a v3 SHADOW at HELLO. DroidNet speaks all three (it only shows
+double taps to a v2 SHADOW and long presses to a v3 one); the reference client (`tools/shadowmap/`)
+speaks v3 only.
 
 Every line is one of these:
 
@@ -210,7 +264,7 @@ digits. SHADOW accepts upper or lower case and sends upper case.
 - **Lengths:** requests are at most 72 characters; replies at most 80, before the route.
 - **Terminators:** lines end in `\r` or `\n`.
 - **Tokens:** separated by single spaces.
-- **Slots:** written as `<C> <M> <B>`, e.g. `F L1 UP`, or `F L1 UP2` for its double tap.
+- **Slots:** written as `<C> <M> <B>`, e.g. `F L1 UP`, `F L1 UP2` for its double tap, or `F L1 UPL` for its long press.
 - **One write-type operation at a time.** SET, REVERT, DEFAULTS, PREFIX, SUFFIX, DUMP and SUM are
   refused with `ERR busy` while another one runs. HELLO, CFG, GET, EVENTS and BAT are always answered.
 
@@ -218,13 +272,13 @@ digits. SHADOW accepts upper or lower case and sends upper case.
 
 | Request | Reply |
 | --- | --- |
-| `HELLO [route]` | `READY v2 fw=<ver> slots=144 gen=<g> fmt=<0\|1> pads=<FD\|F\|D\|->`. `route` sets where replies go on the WCB port: `0` (the default) = `;S0`, `n` = `;W<n>;S0`. It is kept in RAM, so the Pi should send HELLO after SHADOW reboots. |
+| `HELLO [route]` | `READY v3 fw=<ver> slots=216 gen=<g> fmt=<0\|1> pads=<FD\|F\|D\|->`. `route` sets where replies go on the WCB port: `0` (the default) = `;S0`, `n` = `;W<n>;S0`. It is kept in RAM, so the Pi should send HELLO after SHADOW reboots. |
 | `CFG` | `CFG pre=<hex> suf=<hex\|->` |
 | `GET <slot>` | `SLOT <slot> <key\|-> <src> def=<key\|->`, or for a reserved slot `SLOT <slot> - reserved res=<reason>`. `src` is `eeprom`, `default` or `reserved`. |
 | `SET <slot> <key\|->` | `OK SET <slot> <key\|->` once written and verified. `-` unmaps the slot, as a custom value. |
 | `REVERT <slot>` | `OK REVERT <slot>`. The slot is back on its built-in default (`src=default`). |
-| `DUMP` | 144 `SLOT` lines in slot order (single presses, then double taps), then `END DUMP 144`. About 8.5 s at 9600 baud. |
-| `SUM` | `SUM <8 hex> slots=144`: the CRC32 over, for each slot in order, its `SLOT` line text after `@SM SLOT ` plus `\n`. The Pi can compute the same over a cached DUMP and skip the DUMP when they match. About 0.4 s. |
+| `DUMP` | 216 `SLOT` lines in slot order (single presses, double taps, then long presses), then `END DUMP 216`. About 12.5 s at 9600 baud. |
+| `SUM` | `SUM <8 hex> slots=216`: the CRC32 over, for each slot in order, its `SLOT` line text after `@SM SLOT ` plus `\n`. The Pi can compute the same over a cached DUMP and skip the DUMP when they match. About 0.4 s. |
 | `DEFAULTS` | `OK DEFAULTS gen=<g>`. Every slot is back on its built-in default. |
 | `PREFIX <hex>` | `OK PREFIX <hex>`. The prefix must start with `;`, can't end with `;`, is at most 11 printable characters, and has no `^` and no `;T`/`;t`. |
 | `SUFFIX <hex\|->` | `OK SUFFIX <hex\|->`. At most 7 printable characters, no `^`, no `;T`/`;t`. |
@@ -237,7 +291,7 @@ These are only sent with `EVENTS 1`, and are dropped rather than queued if the l
 
 | Event | When |
 | --- | --- |
-| `PRESS <slot> <key\|-> <src> [from=<F\|D>] [res=<reason>]` | Any combo that reaches the mapping, mapped or not, when it fires: a double tap as `UP2`, a combo that waited for a second tap when its window closes. `from=` means the modifier was held on that other controller. |
+| `PRESS <slot> <key\|-> <src> [from=<F\|D>] [res=<reason>]` | Any combo that reaches the mapping, mapped or not, when it fires: a double tap as `UP2`, a long press as `UPL` when it fires, a combo that waited for a second tap when its window closes. `from=` means the modifier was held on that other controller. |
 | `CTL <F\|D> <0\|1>` | A controller connected or dropped |
 
 ### Battery reports
@@ -392,7 +446,8 @@ The library has no Arduino dependency, so it builds and tests on the host.
   - a pass during a DUMP: 0.93 ms
   - a button press: 0.21 ms; the worst pass of a double tap: 0.43 ms
 
-  Boot reads the 72 double-tap records once, in `setup()`: 8.3 ms.
+  Boot reads the 144 double-tap and long-press records once, in `setup()` (8.3 ms for the 72 double
+  taps; the long-press bank adds about as much).
 
   A test fails if any of these reach 1 ms. Motor updates run every 25 ms. Nothing in the mapping
   waits:
@@ -404,21 +459,21 @@ The library has no Arduino dependency, so it builds and tests on the host.
     more than about 128 bytes for them.
 - **Round trips on SHADOW's side,** from the simulator, 9600 baud: GET about 75 ms, SET about
   120 ms (250 ms for the first write, which formats the EEPROM), SUM about 330 ms, DUMP about
-  7.9 s (144 slots; it was 4.2 s for 72). The inbound leg adds about 1 ms per character.
+  7.9 s for 144 slots (4.2 s for 72); expect about 12 s for 216. The inbound leg adds about 1 ms per character.
 - **Round trips on the droid** (2026-09-24, WCB 1 S2, from DroidNet's listener API on the Pi to the reply in
   its serial history): HELLO 91-129 ms, GET 107-136 ms, SUM about 140 ms, SET 205 ms (303 ms for the first
   write), REVERT 159-175 ms, DUMP 4.41 s to `END DUMP 72`. Those were v1, before double taps; expect a
-  DUMP of about 8.5 s and a SUM of about 0.3 s now (not yet measured on the droid).
+  DUMP of about 12.5 s (v3, 216 slots) and a SUM of about 0.3 s now (not yet measured on the droid).
 - **Memory:**
-  - Static SRAM is 2907 bytes, down from 3801 before the runtime mapping (the tables,
+  - Static SRAM is 2970 bytes, down from 3801 before the runtime mapping (the tables,
     descriptions and switch strings are gone). Double taps added 89 of them.
-  - Flash is 52,632 of 253,952 bytes.
+  - Flash is 53,156 of 253,952 bytes.
 
 ## Testing
 
 ```bash
-pio test -e native                        # host: 110 tests (+2 AVR-only, skipped)
-pio test -e simavr --without-uploading    # emulated ATmega2560: all 112
+pio test -e native                        # host: 137 tests (+2 AVR-only, skipped)
+pio test -e simavr --without-uploading    # emulated ATmega2560: all 139
 python3 -m unittest tools/shadowmap/test_shadowmap.py   # reference client vs. the firmware logic
 ```
 
@@ -432,6 +487,10 @@ python3 -m unittest tools/shadowmap/test_shadowmap.py   # reference client vs. t
   - runtime timing, and the real EEPROM under simavr
   - double taps (`test_double_tap`): exclusive firing, the window, holds, taps after a double
     tap, both controllers, drops and faults, events
+  - long presses (`test_long_press`, 24 cases): the threshold, releases before and after it, with
+    and without a double tap, a double tap on a long-press combo, no repeat, another combo pressed
+    while waiting, a modifier landing late, both controllers, drops and faults, the staleness rule,
+    events
   - the Python client through a WCB emulator, including corrupted and dropped lines and a
     remote-WCB route
 - **If a simavr run hangs:** the test program has probably run out of the Mega's 8 KB of SRAM. On
@@ -442,6 +501,8 @@ python3 -m unittest tools/shadowmap/test_shadowmap.py   # reference client vs. t
 ## Not done yet
 
 - On the droid: real button presses, driving while editing, and a power cycle (HANDOFF_BUTTON_MAP.md §0).
+- On the droid: long presses. Worth checking: 600 ms on a Navigation controller, and the v3 DUMP
+  time through the WCB.
 - On the droid: double taps (`bde79a4`). Tested on the host, simavr and through DroidNet against the simulator only.
   Worth checking: that 350 ms suits a Navigation controller's D-pad, and the v2 DUMP time through the WCB.
 - The DroidNet tab and backend (see the [backend design](https://github.com/travisccook/DroidNetSignalBooster/blob/main/docs/superpowers/specs/2026-09-24-shadow-button-map-design.md)).

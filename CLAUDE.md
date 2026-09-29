@@ -58,7 +58,7 @@ python3 -m unittest tools/shadowmap/test_shadowmap.py   # Pi-side client vs. the
 
 1. **Safety Critical Code**: The main control loop must never be blocked. Motor control and fault detection require real-time responses.
 2. **Serial Communication**: All inter-board communication uses 9600 baud. Higher rates have proven unreliable in the electrically noisy droid environment.
-3. **Button Mapping**: DroidNet changes mappings at runtime (stored in EEPROM, which survives reboots and uploads). To change the built-in defaults, edit `src/default_mappings.cpp` and run the tests. DroidNet shows the live mapping; the old control-mapping spreadsheet is retired. EEPROM holds the mapping (2656 bytes from address 0: the single presses, then their double taps); anything else that uses EEPROM must start after that.
+3. **Button Mapping**: DroidNet changes mappings at runtime (stored in EEPROM, which survives reboots and uploads). To change the built-in defaults, edit `src/default_mappings.cpp` and run the tests. DroidNet shows the live mapping; the old control-mapping spreadsheet is retired. EEPROM holds the mapping (3952 bytes from address 0: the single presses, their double taps, then their long presses); anything else that uses EEPROM must start after that.
 
 ## Development Best Practices
 
