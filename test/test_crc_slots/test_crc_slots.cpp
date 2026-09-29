@@ -27,16 +27,21 @@ static void test_crc32_ieee_check_value_and_incremental() {
 
 static void test_slot_index_round_trip() {
     TEST_ASSERT_EQUAL_UINT8(72, sm::kSingleSlotCount);
-    TEST_ASSERT_EQUAL_UINT8(144, sm::kSlotCount);
+    TEST_ASSERT_EQUAL_UINT8(216, sm::kSlotCount);
     TEST_ASSERT_EQUAL_UINT8(0, sm::slotIndex(Ctrl::F, Mod::NONE, Btn::UP));
     TEST_ASSERT_EQUAL_UINT8(71, sm::slotIndex(Ctrl::D, Mod::CROSS, Btn::PS));
     TEST_ASSERT_EQUAL_UINT8(72, sm::slotIndex(Ctrl::F, Mod::NONE, Btn::UP, sm::Tap::DOUBLE));
     TEST_ASSERT_EQUAL_UINT8(143, sm::slotIndex(Ctrl::D, Mod::CROSS, Btn::PS, sm::Tap::DOUBLE));
+    TEST_ASSERT_EQUAL_UINT8(144, sm::slotIndex(Ctrl::F, Mod::NONE, Btn::UP, sm::Tap::LONG));
+    TEST_ASSERT_EQUAL_UINT8(215, sm::slotIndex(Ctrl::D, Mod::CROSS, Btn::PS, sm::Tap::LONG));
     for (uint8_t slot = 0; slot < sm::kSlotCount; ++slot) {
         TEST_ASSERT_EQUAL_UINT8(slot, sm::slotIndex(sm::slotCtrl(slot), sm::slotMod(slot), sm::slotBtn(slot),
                                                     sm::slotTap(slot)));
         TEST_ASSERT_EQUAL_UINT8(slot % 72 + 72, sm::doubleOf(slot));
+        TEST_ASSERT_EQUAL_UINT8(slot % 72 + 144, sm::longOf(slot));
     }
+    TEST_ASSERT_TRUE(sm::slotTap(143) == sm::Tap::DOUBLE);
+    TEST_ASSERT_TRUE(sm::slotTap(144) == sm::Tap::LONG);
 }
 
 static void test_format_and_parse_every_slot() {
@@ -49,6 +54,11 @@ static void test_format_and_parse_every_slot() {
     TEST_ASSERT_EQUAL_UINT8(15, sm::formatSlot(text, sizeof(text),
                                                sm::slotIndex(Ctrl::D, Mod::CIRCLE, Btn::RIGHT, sm::Tap::DOUBLE)));
     TEST_ASSERT_EQUAL_STRING("D CIRCLE RIGHT2", text);
+    TEST_ASSERT_EQUAL_UINT8(15, sm::formatSlot(text, sizeof(text),
+                                               sm::slotIndex(Ctrl::D, Mod::CIRCLE, Btn::RIGHT, sm::Tap::LONG)));
+    TEST_ASSERT_EQUAL_STRING("D CIRCLE RIGHTL", text);
+    sm::formatSlot(text, sizeof(text), sm::slotIndex(Ctrl::F, Mod::NONE, Btn::L3, sm::Tap::LONG));
+    TEST_ASSERT_EQUAL_STRING("F NONE L3L", text);
     TEST_ASSERT_EQUAL_UINT8(0, sm::formatSlot(text, 5, 0));
     TEST_ASSERT_EQUAL_UINT8(0, sm::formatSlot(text, sizeof(text), sm::kSlotCount));
 
@@ -96,6 +106,16 @@ static void test_parse_rejects_near_misses() {
     TEST_ASSERT_TRUE(b == Btn::RIGHT && t == sm::Tap::DOUBLE);
     TEST_ASSERT_TRUE(sm::parseBtn("L32", &b, &t));  // a token; the slot is reserved
     TEST_ASSERT_TRUE(b == Btn::L3 && t == sm::Tap::DOUBLE);
+    TEST_ASSERT_TRUE(sm::parseBtn("UPL", &b, &t));
+    TEST_ASSERT_TRUE(b == Btn::UP && t == sm::Tap::LONG);
+    TEST_ASSERT_TRUE(sm::parseBtn("L3L", &b, &t));  // a token; the slot is reserved
+    TEST_ASSERT_TRUE(b == Btn::L3 && t == sm::Tap::LONG);
+    TEST_ASSERT_FALSE(sm::parseBtn("upl", &b, &t));
+    TEST_ASSERT_FALSE(sm::parseBtn("UPL2", &b, &t));
+    TEST_ASSERT_FALSE(sm::parseBtn("UP2L", &b, &t));
+    TEST_ASSERT_FALSE(sm::parseBtn("L", &b, &t));
+    TEST_ASSERT_FALSE(sm::parseBtn("CROSSL", &b, &t));
+    TEST_ASSERT_FALSE(sm::parseBtn("UPL", &b));  // no tap out-parameter: single presses only
 }
 
 static void test_reserved_slots() {
@@ -104,7 +124,7 @@ static void test_reserved_slots() {
         if (sm::slotReserved(slot) != sm::Reserved::No)
             ++count;
     }
-    TEST_ASSERT_EQUAL_UINT8(29, count);  // 9 single presses; their double taps and every L3 double tap
+    TEST_ASSERT_EQUAL_UINT8(49, count);  // 9 single presses; their double taps and long presses, and every L3 of both
     for (uint8_t c = 0; c < 2; ++c) {
         const Ctrl ctrl = static_cast<Ctrl>(c);
         TEST_ASSERT_TRUE(sm::slotReserved(sm::slotIndex(ctrl, Mod::NONE, Btn::PS)) == sm::Reserved::PsGate);
@@ -131,6 +151,19 @@ static void test_reserved_slots() {
     }
     TEST_ASSERT_TRUE(sm::slotReserved(sm::slotIndex(Ctrl::D, Mod::L1, Btn::L3, sm::Tap::DOUBLE)) == sm::Reserved::Stick);
     TEST_ASSERT_TRUE(sm::slotReserved(sm::slotIndex(Ctrl::F, Mod::L2, Btn::PS, sm::Tap::DOUBLE)) == sm::Reserved::No);
+
+    // Long presses: the same reservations, and none on the stick click.
+    for (uint8_t slot = 0; slot < 72; ++slot) {
+        const sm::Reserved single = sm::slotReserved(slot);
+        const sm::Reserved lng = sm::slotReserved(sm::longOf(slot));
+        if (single != sm::Reserved::No)
+            TEST_ASSERT_TRUE(lng == single);
+        else if (sm::slotBtn(slot) == Btn::L3)
+            TEST_ASSERT_TRUE(lng == sm::Reserved::Stick);
+        else
+            TEST_ASSERT_TRUE(lng == sm::Reserved::No);
+    }
+    TEST_ASSERT_TRUE(sm::slotReserved(sm::slotIndex(Ctrl::F, Mod::L1, Btn::L3, sm::Tap::LONG)) == sm::Reserved::OverSpeed);
 }
 
 static void test_key_validation() {

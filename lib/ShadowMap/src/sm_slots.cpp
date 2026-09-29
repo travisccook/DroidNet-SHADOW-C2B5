@@ -14,6 +14,7 @@ const char kReservedOverSpeed[] PROGMEM = "overspeed";
 const char kReservedStick[] PROGMEM = "stick";
 const char kSpace[] PROGMEM = " ";
 const char kDoubleMark[] PROGMEM = "2";
+const char kLongMark[] PROGMEM = "L";
 
 template <uint8_t N, uint8_t W>
 bool parseToken(const char *s, const char (&tokens)[N][W], uint8_t *out) {
@@ -47,7 +48,7 @@ Reserved slotReserved(uint8_t slot) {
         return Reserved::PsGate;
     if (slotCtrl(slot) == Ctrl::F && m == Mod::L1 && slotBtn(slot) == Btn::L3)
         return Reserved::OverSpeed;
-    if (slotTap(slot) == Tap::DOUBLE && slotBtn(slot) == Btn::L3)
+    if (slotTap(slot) != Tap::SINGLE && slotBtn(slot) == Btn::L3)
         return Reserved::Stick;
     return Reserved::No;
 }
@@ -76,17 +77,20 @@ bool parseBtn(const char *s, Btn *out, Tap *tap) {
             *tap = Tap::SINGLE;
         return true;
     }
-    // "UP2": a button token and the double-tap mark.
+    // "UP2" / "UPL": a button token and the double-tap or long-press mark.
     const size_t n = strlen(s);
     char base[sizeof(kBtnTokens[0])];
-    if (tap == nullptr || n < 2 || n > sizeof(base) || s[n - 1] != '2')
+    if (tap == nullptr || n < 2 || n > sizeof(base))
+        return false;
+    const char mark = s[n - 1];
+    if (mark != '2' && mark != 'L')
         return false;
     memcpy(base, s, n - 1);
     base[n - 1] = '\0';
     if (!parseToken(base, kBtnTokens, &i))
         return false;
     *out = static_cast<Btn>(i);
-    *tap = Tap::DOUBLE;
+    *tap = mark == '2' ? Tap::DOUBLE : Tap::LONG;
     return true;
 }
 
@@ -100,7 +104,8 @@ uint8_t formatSlot(char *dst, uint8_t cap, uint8_t slot) {
                     appendP(dst, cap, &len, kModTokens[static_cast<uint8_t>(slotMod(slot))]) &&
                     appendP(dst, cap, &len, kSpace) &&
                     appendP(dst, cap, &len, kBtnTokens[static_cast<uint8_t>(slotBtn(slot))]) &&
-                    (slotTap(slot) == Tap::SINGLE || appendP(dst, cap, &len, kDoubleMark));
+                    (slotTap(slot) == Tap::SINGLE ||
+                     appendP(dst, cap, &len, slotTap(slot) == Tap::DOUBLE ? kDoubleMark : kLongMark));
     if (!ok) {
         dst[0] = '\0';
         return 0;
