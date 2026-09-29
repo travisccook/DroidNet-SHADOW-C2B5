@@ -36,7 +36,7 @@ bool Runtime::handlePad(Ctrl ctrl, const PadState &self, const PadState &other, 
 
     bool any = false;
     if (t.pending != kNoSlot)
-        any = settle(t, nowMs, fired);  // before this pass's press, which is too late to be the second tap
+        any = settle(t, slot, nowMs, fired);  // before this pass's press, which is too late to be the second tap
 
     if (slot != t.held) {
         any = pressed(t, slot, fromOther, nowMs, fired) || any;
@@ -53,13 +53,15 @@ bool Runtime::handlePad(Ctrl ctrl, const PadState &self, const PadState &other, 
 }
 
 // A first press waiting on a double tap or a long press: fires it once its moment comes. A
-// release is pressed()'s job; this handles the time running out.
-bool Runtime::settle(PadTaps &t, uint32_t nowMs, FiredPress *fired) {
+// release is pressed()'s job; this handles the time running out. `slot` is the combo held
+// this pass: a long press fires only if it is still that combo, so a release (or another
+// combo) arriving after a gap in passes is left to pressed() and counts as a fresh single press.
+bool Runtime::settle(PadTaps &t, uint8_t slot, uint32_t nowMs, FiredPress *fired) {
     const uint8_t first = t.pending;
     const uint32_t age = nowMs - t.pendingAt;
     if (t.mode == Hold::Waiting && store_.longPressMapped(first)) {
         // Still held, and it has a long press: nothing until the threshold.
-        if (age < longPressMs_)
+        if (age < longPressMs_ || slot != first)
             return false;
         t.pending = kNoSlot;
         t.mode = Hold::Latched;  // once, no repeat; releasing it does nothing

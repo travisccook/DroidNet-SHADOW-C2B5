@@ -36,7 +36,8 @@ struct Rig {
 Rig *rig = nullptr;
 
 const PadState kOff = {false, 0};
-const uint8_t kUp2 = slotIndex(Ctrl::F, Mod::NONE, Btn::UP, Tap::DOUBLE);
+const uint8_t kUp2 =
+    slotIndex(Ctrl::F, Mod::NONE, Btn::UP, Tap::DOUBLE);
 const uint8_t kUpL = slotIndex(Ctrl::F, Mod::NONE, Btn::UP, Tap::LONG);
 const uint32_t kLong = Runtime::kLongPressMs;
 const uint32_t kWindow = Runtime::kDoubleTapMs;
@@ -58,7 +59,8 @@ void hold(uint32_t from, uint32_t to, PadState foot, PadState dome = kOff) {
 }
 
 void mapSlot(uint8_t slot, const char *key) {
-    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MapStore::Result::Ok), static_cast<uint8_t>(rig->store.beginSet(slot, key)));
+    const MapStore::Result r = rig->store.beginSet(slot, key);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MapStore::Result::Ok), static_cast<uint8_t>(r));
     while (rig->store.busy()) {
         rig->store.step();
         rig->eeprom.tick();
@@ -211,7 +213,8 @@ static void test_a_long_press_held_up_by_a_fault_is_dropped() {
 
 static void test_a_long_press_after_a_short_gap_still_fires() {
     hold(0, 100, held(kHeldUp));
-    TEST_ASSERT_TRUE(pass(kLong + 200, held(kHeldUp)));  // within 250 ms of the threshold
+    // within 250 ms of the threshold
+    TEST_ASSERT_TRUE(pass(kLong + 200, held(kHeldUp)));
     TEST_ASSERT_EQUAL_STRING(";W1;Cquiet", lastCommand());
 }
 
@@ -219,6 +222,72 @@ static void test_release_after_a_short_gap_is_fresh() {
     hold(0, 100, held(kHeldUp));
     TEST_ASSERT_TRUE(pass(500, held(0)));  // a 400 ms gap, released before the threshold
     TEST_ASSERT_EQUAL_STRING(";W1;Chappysound", lastCommand());
+}
+
+static void test_release_after_a_gap_past_the_threshold_is_a_single() {
+    hold(0, 100, held(kHeldUp));
+    // A fault skips passes 101..649; the first pass back shows the button released.
+    TEST_ASSERT_TRUE(pass(650, held(0)));
+    TEST_ASSERT_EQUAL_STRING(";W1;Chappysound", lastCommand());
+    hold(651, 3000, held(0));
+    TEST_ASSERT_EQUAL_UINT32(1, commands());
+}
+
+static void test_modifier_after_a_gap_past_the_threshold_is_a_single_then_the_combo() {
+    hold(0, 100, held(kHeldUp));
+    TEST_ASSERT_TRUE(pass(650, held(kHeldUp | kHeldL1)));
+    TEST_ASSERT_EQUAL_UINT32(2, commands());
+    TEST_ASSERT_EQUAL_STRING(";W1;Chappysound", lastCommand(1));
+    TEST_ASSERT_EQUAL_STRING(";W1;Cextremehappysou", lastCommand(0));
+    hold(651, 3000, held(0));
+    TEST_ASSERT_EQUAL_UINT32(2, commands());
+}
+
+static void test_release_after_a_gap_with_a_double_tap_mapped_is_a_single() {
+    mapSlot(kUp2, "twice");
+    hold(0, 100, held(kHeldUp));
+    TEST_ASSERT_TRUE(pass(650, held(0)));
+    TEST_ASSERT_EQUAL_STRING(";W1;Chappysound", lastCommand());
+    hold(651, 3000, held(0));
+    TEST_ASSERT_EQUAL_UINT32(1, commands());
+}
+
+static void test_a_tap_after_a_long_press_is_an_ordinary_press() {
+    hold(0, kLong, held(kHeldUp));
+    hold(kLong + 1, 999, held(0));
+    TEST_ASSERT_EQUAL_UINT32(1, commands());
+    hold(1000, 1040, held(kHeldUp));
+    TEST_ASSERT_TRUE(pass(1041, held(0)));
+    TEST_ASSERT_EQUAL_STRING(";W1;Chappysound", lastCommand());
+    hold(1042, 3000, held(0));
+    TEST_ASSERT_EQUAL_UINT32(2, commands());
+}
+
+static void test_no_long_press_inside_the_quiet_period_after_a_double_tap() {
+    mapSlot(kUp2, "twice");
+    hold(0, 40, held(kHeldUp));
+    hold(41, 100, held(0));
+    TEST_ASSERT_TRUE(pass(101, held(kHeldUp)));
+    TEST_ASSERT_EQUAL_STRING(";W1;Ctwice", lastCommand());
+    hold(102, 140, held(kHeldUp));
+    hold(141, 299, held(0));
+    hold(300, 1200, held(kHeldUp));
+    hold(1201, 3000, held(0));
+    TEST_ASSERT_EQUAL_UINT32(1, commands());
+}
+
+static void test_staleness_boundary() {
+    hold(0, 100, held(kHeldUp));
+    TEST_ASSERT_TRUE(pass(kLong + Runtime::kDeferMaxMs, held(kHeldUp)));  // exactly 850: still fires
+    TEST_ASSERT_EQUAL_STRING(";W1;Cquiet", lastCommand());
+    TEST_ASSERT_EQUAL_UINT32(1, commands());
+    setUp();
+    mapSlot(kUpL, "quiet");
+    hold(0, 100, held(kHeldUp));
+    TEST_ASSERT_FALSE(pass(kLong + Runtime::kDeferMaxMs + 1, held(kHeldUp)));  // 851: dropped
+    hold(kLong + Runtime::kDeferMaxMs + 2, 3000, held(kHeldUp));
+    hold(3001, 4000, held(0));
+    TEST_ASSERT_EQUAL_UINT32(0, commands());
 }
 
 static void test_press_event_names_the_long_press() {
@@ -230,7 +299,8 @@ static void test_press_event_names_the_long_press() {
     char body[96];
     bool saw = false;
     for (uint8_t i = 0; i < LineLog::kLines; ++i) {
-        if (stripCrc(rig->wcb.usb.last(i), body, sizeof(body)) && strcmp(body, "@SM PRESS F NONE UPL quiet eeprom") == 0)
+        if (stripCrc(rig->wcb.usb.last(i), body, sizeof(body)) &&
+            strcmp(body, "@SM PRESS F NONE UPL quiet eeprom") == 0)
             saw = true;
     }
     TEST_ASSERT_TRUE(saw);
@@ -272,6 +342,12 @@ int runAllTests() {
     RUN_TEST(test_a_long_press_held_up_by_a_fault_is_dropped);
     RUN_TEST(test_a_long_press_after_a_short_gap_still_fires);
     RUN_TEST(test_release_after_a_short_gap_is_fresh);
+    RUN_TEST(test_release_after_a_gap_past_the_threshold_is_a_single);
+    RUN_TEST(test_modifier_after_a_gap_past_the_threshold_is_a_single_then_the_combo);
+    RUN_TEST(test_release_after_a_gap_with_a_double_tap_mapped_is_a_single);
+    RUN_TEST(test_a_tap_after_a_long_press_is_an_ordinary_press);
+    RUN_TEST(test_no_long_press_inside_the_quiet_period_after_a_double_tap);
+    RUN_TEST(test_staleness_boundary);
     RUN_TEST(test_press_event_names_the_long_press);
     RUN_TEST(test_unmapping_the_long_press_restores_the_old_timing);
     RUN_TEST(test_threshold_is_configurable);

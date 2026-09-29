@@ -67,11 +67,13 @@ class Runtime {
     // as the old code did. A combo fires when pressed and again every second while held; the
     // repeat timer is shared by both controllers. A combo whose double tap or long press is mapped waits
     // instead (see WIPDocs/COMMAND_MAPPING_DESIGN.md, Double taps and Long presses): a second press within
-    // the window fires the double tap, a hold to the threshold fires the long press, anything else fires the combo itself, late. Returns
-    // true, filling `fired`, when a combo fired this pass.
+    // the window fires the double tap, a hold to the threshold fires the long press, anything
+    // else fires the combo itself: late, or on release if it has a long press. Returns true,
+    // filling `fired`, when a combo fired this pass.
     bool buttons(uint32_t nowMs, const PadState &foot, const PadState &dome, FiredPress *fired);
 
-    // True while a first tap waits to see whether a second one follows.
+    // True while a first tap waits to see whether a second one follows, or a held combo with a
+    // long press waits to be released or held long enough.
     bool tapPending() const { return taps_[0].pending != kNoSlot || taps_[1].pending != kNoSlot; }
 
     // Reads @SM requests from `port` without blocking, at most kMaxBytesPerPass bytes a pass.
@@ -133,7 +135,7 @@ class Runtime {
     };
 
     bool handlePad(Ctrl ctrl, const PadState &self, const PadState &other, uint32_t nowMs, FiredPress *fired);
-    bool settle(PadTaps &t, uint32_t nowMs, FiredPress *fired);
+    bool settle(PadTaps &t, uint8_t slot, uint32_t nowMs, FiredPress *fired);
     bool pressed(PadTaps &t, uint8_t slot, bool fromOther, uint32_t nowMs, FiredPress *fired);
     bool legacy(uint8_t slot, bool fromOther, uint32_t nowMs, FiredPress *fired);
     bool fireOrDefer(uint8_t slot, bool modFromOther, uint32_t nowMs, FiredPress *fired);
