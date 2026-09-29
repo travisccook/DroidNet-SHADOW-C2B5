@@ -10,7 +10,7 @@ namespace sm {
 
 namespace {
 
-constexpr uint8_t kProtocolVersion = 2;  // 2: double-tap slots
+constexpr uint8_t kProtocolVersion = 3;  // 2: double-tap slots; 3: long-press slots
 constexpr uint8_t kMaxRouteLen = 8;  // ";W20,;S0"
 constexpr uint8_t kMaxArgs = 7;
 

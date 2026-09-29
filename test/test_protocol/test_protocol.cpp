@@ -6,7 +6,7 @@
 #include <sm_protocol_rig.h>
 
 static void test_hello_reports_version_and_state() {
-    TEST_ASSERT_EQUAL_STRING("@SM READY v2 fw=test slots=144 gen=0 fmt=0 pads=-", ask("@SM HELLO"));
+    TEST_ASSERT_EQUAL_STRING("@SM READY v3 fw=test slots=216 gen=0 fmt=0 pads=-", ask("@SM HELLO"));
     TEST_ASSERT_EQUAL_UINT8(0, rig->wcb.lastRoute);
 }
 
@@ -38,7 +38,7 @@ static void test_crc_is_required_on_the_wcb_port() {
             *p = static_cast<char>(*p - 'A' + 'a');
     }
     TEST_ASSERT_TRUE(rig->protocol.handleLine(line, rig->wcbPort));
-    TEST_ASSERT_EQUAL_STRING("@SM READY v2 fw=test slots=144 gen=0 fmt=0 pads=-", await());
+    TEST_ASSERT_EQUAL_STRING("@SM READY v3 fw=test slots=216 gen=0 fmt=0 pads=-", await());
 }
 
 static void test_usb_port_accepts_lines_without_crc() {
@@ -69,7 +69,7 @@ static void test_set_replies_after_the_write_lands() {
     TEST_ASSERT_EQUAL_STRING("@SM SLOT F NONE DOWN scream eeprom def=angrysound", ask("@SM GET F NONE DOWN"));
     TEST_ASSERT_EQUAL_STRING("@SM OK SET F NONE DOWN -", ask("@SM SET F NONE DOWN -"));
     TEST_ASSERT_EQUAL_STRING("@SM SLOT F NONE DOWN - eeprom def=angrysound", ask("@SM GET F NONE DOWN"));
-    TEST_ASSERT_EQUAL_STRING("@SM READY v2 fw=test slots=144 gen=0 fmt=1 pads=-", ask("@SM HELLO"));
+    TEST_ASSERT_EQUAL_STRING("@SM READY v3 fw=test slots=216 gen=0 fmt=1 pads=-", ask("@SM HELLO"));
 }
 
 static void test_set_errors() {
@@ -105,7 +105,7 @@ static void test_dump_streams_every_slot_then_end() {
     char body[96];
     uint32_t seen = 0;
     bool sawCustom = false, sawReserved = false, sawDouble = false, sawStick = false;
-    for (int i = 0; i < 20000 && seen < 145; ++i) {
+    for (int i = 0; i < 20000 && seen < sm::kSlotCount + 1; ++i) {
         const uint32_t before = rig->wcb.usb.count;
         pass(4);  // a slow UART: about what 9600 baud drains between passes
         const uint32_t added = rig->wcb.usb.count - before;
@@ -114,7 +114,7 @@ static void test_dump_streams_every_slot_then_end() {
             TEST_ASSERT_TRUE_MESSAGE(stripCrc(rig->wcb.usb.last(static_cast<uint8_t>(k - 1)), body, sizeof(body)),
                                      rig->wcb.usb.last(static_cast<uint8_t>(k - 1)));
             ++seen;
-            if (seen <= 144) {
+            if (seen <= sm::kSlotCount) {
                 TEST_ASSERT_EQUAL_INT(0, strncmp(body, "@SM SLOT ", 9));
                 if (strcmp(body, "@SM SLOT D CROSS LEFT custom eeprom def=scanning") == 0)
                     sawCustom = true;
@@ -125,11 +125,11 @@ static void test_dump_streams_every_slot_then_end() {
                 if (strcmp(body, "@SM SLOT F NONE L32 - reserved res=stick") == 0)
                     sawStick = true;
             } else {
-                TEST_ASSERT_EQUAL_STRING("@SM END DUMP 144", body);
+                TEST_ASSERT_EQUAL_STRING("@SM END DUMP 216", body);
             }
         }
     }
-    TEST_ASSERT_EQUAL_UINT32(145, seen);
+    TEST_ASSERT_EQUAL_UINT32(sm::kSlotCount + 1, seen);
     TEST_ASSERT_TRUE(sawCustom);
     TEST_ASSERT_TRUE(sawReserved);
     TEST_ASSERT_TRUE(sawDouble);

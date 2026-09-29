@@ -103,21 +103,21 @@ static void test_sum_matches_the_dump() {
     uint32_t crc = kCrc32Init;
     char body[96];
     uint32_t seen = 0;
-    for (int i = 0; i < 40000 && seen < 145; ++i) {
+    for (int i = 0; i < 40000 && seen < sm::kSlotCount + 1; ++i) {
         const uint32_t before = rig->wcb.usb.count;
         pass();
         for (uint32_t k = rig->wcb.usb.count - before; k > 0; --k) {
             TEST_ASSERT_TRUE(stripCrc(rig->wcb.usb.last(static_cast<uint8_t>(k - 1)), body, sizeof(body)));
-            if (++seen <= 144) {
+            if (++seen <= sm::kSlotCount) {
                 for (const char *c = body + 9; *c != '\0'; ++c)  // after "@SM SLOT "
                     crc = crc32Update(crc, static_cast<uint8_t>(*c));
                 crc = crc32Update(crc, '\n');
             }
         }
     }
-    TEST_ASSERT_EQUAL_UINT32(145, seen);
+    TEST_ASSERT_EQUAL_UINT32(sm::kSlotCount + 1, seen);
     char want[40];
-    snprintf(want, sizeof(want), "@SM SUM %08lX slots=144", static_cast<unsigned long>(crc32Final(crc)));
+    snprintf(want, sizeof(want), "@SM SUM %08lX slots=216", static_cast<unsigned long>(crc32Final(crc)));
     TEST_ASSERT_EQUAL_STRING(want, ask("@SM SUM"));
     // Any change moves it.
     ask("@SM SET D CROSS LEFT other");
@@ -135,7 +135,7 @@ static void test_press_reports_modifier_from_other_controller() {
 
 static void test_controller_state_in_ready_and_events() {
     rig->protocol.setPads(true, false);
-    TEST_ASSERT_EQUAL_STRING("@SM READY v2 fw=test slots=144 gen=0 fmt=0 pads=F", ask("@SM HELLO"));
+    TEST_ASSERT_EQUAL_STRING("@SM READY v3 fw=test slots=216 gen=0 fmt=0 pads=F", ask("@SM HELLO"));
     ask("@SM EVENTS 1");
     for (int i = 0; i < 30; ++i)
         pass();
@@ -146,9 +146,19 @@ static void test_controller_state_in_ready_and_events() {
     rig->protocol.setPads(false, false);
     TEST_ASSERT_EQUAL_STRING("@SM CTL F 0", await());
     TEST_ASSERT_EQUAL_STRING("@SM CTL D 0", await());
-    TEST_ASSERT_EQUAL_STRING("@SM READY v2 fw=test slots=144 gen=0 fmt=0 pads=-", ask("@SM HELLO"));
+    TEST_ASSERT_EQUAL_STRING("@SM READY v3 fw=test slots=216 gen=0 fmt=0 pads=-", ask("@SM HELLO"));
     rig->protocol.setPads(false, true);
-    TEST_ASSERT_EQUAL_STRING("@SM READY v2 fw=test slots=144 gen=0 fmt=0 pads=D", ask("@SM HELLO"));
+    TEST_ASSERT_EQUAL_STRING("@SM READY v3 fw=test slots=216 gen=0 fmt=0 pads=D", ask("@SM HELLO"));
+}
+
+static void test_long_press_slots_v3() {
+    TEST_ASSERT_EQUAL_STRING("@SM SLOT F L1 UPL - default def=-", ask("@SM GET F L1 UPL"));
+    TEST_ASSERT_EQUAL_STRING("@SM SLOT F NONE L3L - reserved res=stick", ask("@SM GET F NONE L3L"));
+    TEST_ASSERT_EQUAL_STRING("@SM SLOT F L1 L3L - reserved res=overspeed", ask("@SM GET F L1 L3L"));
+    TEST_ASSERT_EQUAL_STRING("@SM ERR reserved SET F NONE L3L", ask("@SM SET F NONE L3L quiet"));
+    TEST_ASSERT_EQUAL_STRING("@SM ERR slot GET", ask("@SM GET F L1 UP3"));
+    TEST_ASSERT_EQUAL_STRING("@SM OK SET F L1 UPL quiet", ask("@SM SET F L1 UPL quiet"));
+    TEST_ASSERT_EQUAL_STRING("@SM SLOT F L1 UPL quiet eeprom def=-", ask("@SM GET F L1 UPL"));
 }
 
 int runAllTests() {
@@ -162,5 +172,6 @@ int runAllTests() {
     RUN_TEST(test_sum_matches_the_dump);
     RUN_TEST(test_press_reports_modifier_from_other_controller);
     RUN_TEST(test_controller_state_in_ready_and_events);
+    RUN_TEST(test_long_press_slots_v3);
     return UNITY_END();
 }
