@@ -13,12 +13,17 @@
 //
 //   FOOT(<modifier>, <button>) / DOME(<modifier>, <button>)
 //   FOOT2(<modifier>, <button>) / DOME2(<modifier>, <button>)   the same combo tapped twice
+//   FOOTL(<modifier>, <button>) / DOMEL(<modifier>, <button>)   the same combo held for a long press
 //     modifier: NONE L1 L2 PS CIRCLE CROSS
-//     button:   UP RIGHT DOWN LEFT L3 PS (L3 has no double tap)
+//     button:   UP RIGHT DOWN LEFT L3 PS (L3 has no double tap or long press)
 //
 // A combo with a double tap mapped waits SHADOW_DOUBLE_TAP_MS (include/config.h) after its
 // first press to see whether a second comes, so its own command fires that much later.
 // There are no built-in double taps: they're set from DroidNet.
+//
+// A combo with a long press mapped fires its single press when released, and its long
+// press once it has been held SHADOW_LONG_PRESS_MS. There are no built-in long presses:
+// they're set from DroidNet.
 //
 // When more than one modifier is held, the first of L1, L2, PS, CIRCLE, CROSS wins, then no
 // modifier. An unmapped combo in that layer does nothing; it doesn't fall back to another
@@ -37,6 +42,8 @@
 #define DOME(mod, btn) sm::slotIndex(sm::Ctrl::D, sm::Mod::mod, sm::Btn::btn)
 #define FOOT2(mod, btn) sm::slotIndex(sm::Ctrl::F, sm::Mod::mod, sm::Btn::btn, sm::Tap::DOUBLE)
 #define DOME2(mod, btn) sm::slotIndex(sm::Ctrl::D, sm::Mod::mod, sm::Btn::btn, sm::Tap::DOUBLE)
+#define FOOTL(mod, btn) sm::slotIndex(sm::Ctrl::F, sm::Mod::mod, sm::Btn::btn, sm::Tap::LONG)
+#define DOMEL(mod, btn) sm::slotIndex(sm::Ctrl::D, sm::Mod::mod, sm::Btn::btn, sm::Tap::LONG)
 
 const sm::DefaultMapping defaultButtonMappings[] PROGMEM = {
     // ---- FOOT controller ----
@@ -106,6 +113,8 @@ const sm::DefaultMapping defaultButtonMappings[] PROGMEM = {
 #undef DOME
 #undef FOOT2
 #undef DOME2
+#undef FOOTL
+#undef DOMEL
 
 template <typename T, size_t N>
 constexpr size_t countOf(const T (&array)[N]) {

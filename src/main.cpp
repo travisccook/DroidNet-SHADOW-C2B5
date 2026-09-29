@@ -217,10 +217,10 @@ static_assert(sizeof(SHADOW_FW_VERSION) <= 12, "SHADOW_FW_VERSION is longer than
 #ifdef SHADOW_WDP_ANNOUNCE
 // The announce line has to fit the 64-byte Serial1 TX buffer in one go.
 static_assert(sm::Runtime::kAnnounceOverhead + sizeof(SHADOW_FW_VERSION) - 1 <= 63, "WCB announce line too long");
-sm::Runtime mapRuntime(mapStore, mapProtocol, wcbTx, SHADOW_FW_VERSION,
-                       SHADOW_DOUBLE_TAP_MS);  // announces every 25-30 s
+sm::Runtime mapRuntime(mapStore, mapProtocol, wcbTx, SHADOW_FW_VERSION, SHADOW_DOUBLE_TAP_MS,
+                       SHADOW_LONG_PRESS_MS);  // announces every 25-30 s
 #else
-sm::Runtime mapRuntime(mapStore, mapProtocol, wcbTx, nullptr, SHADOW_DOUBLE_TAP_MS);
+sm::Runtime mapRuntime(mapStore, mapProtocol, wcbTx, nullptr, SHADOW_DOUBLE_TAP_MS, SHADOW_LONG_PRESS_MS);
 #endif
 
 // The buttons that matter for the mapping, as a bitmask.

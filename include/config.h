@@ -41,6 +41,11 @@
 // later; every other combo fires at once, as always.
 #define SHADOW_DOUBLE_TAP_MS 350
 
+// Long presses: how long (ms) a combo has to be held for its long press. Only combos with a
+// long press mapped wait for it: their single press fires on release instead of at once, and
+// holding them doesn't repeat. Every other combo fires at once, as always.
+#define SHADOW_LONG_PRESS_MS 600
+
 // ---------------------------------------------------------------------------------------
 //                          PS3 Controller MAC Addresses
 // ---------------------------------------------------------------------------------------

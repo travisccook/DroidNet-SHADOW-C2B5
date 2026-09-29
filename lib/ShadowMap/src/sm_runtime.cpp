@@ -35,22 +35,8 @@ bool Runtime::handlePad(Ctrl ctrl, const PadState &self, const PadState &other, 
     const uint8_t slot = gateOpen(self.held) ? resolveSlot(ctrl, self, other, &fromOther) : kNoSlot;
 
     bool any = false;
-    if (t.pending != kNoSlot && nowMs - t.pendingAt >= doubleTapMs_) {
-        // No second press in time: it was a single press. Checked before this pass's press,
-        // which is too late to be the second tap.
-        const uint8_t first = t.pending;
-        t.pending = kNoSlot;
-        if (nowMs - t.pendingAt > doubleTapMs_ + kDeferMaxMs) {
-            if (t.mode == Hold::Waiting)  // passes were held up (a fault): too late to mean anything
-                t.mode = Hold::Latched;
-        } else {
-            any = fireOrDefer(first, t.pendingFromOther, nowMs, fired);
-            if (t.mode == Hold::Waiting) {
-                t.mode = Hold::Repeat;
-                t.lastFire = nowMs;
-            }
-        }
-    }
+    if (t.pending != kNoSlot)
+        any = settle(t, nowMs, fired);  // before this pass's press, which is too late to be the second tap
 
     if (slot != t.held) {
         any = pressed(t, slot, fromOther, nowMs, fired) || any;
@@ -66,25 +52,64 @@ bool Runtime::handlePad(Ctrl ctrl, const PadState &self, const PadState &other, 
     return any;
 }
 
+// A first press waiting on a double tap or a long press: fires it once its moment comes. A
+// release is pressed()'s job; this handles the time running out.
+bool Runtime::settle(PadTaps &t, uint32_t nowMs, FiredPress *fired) {
+    const uint8_t first = t.pending;
+    const uint32_t age = nowMs - t.pendingAt;
+    if (t.mode == Hold::Waiting && store_.longPressMapped(first)) {
+        // Still held, and it has a long press: nothing until the threshold.
+        if (age < longPressMs_)
+            return false;
+        t.pending = kNoSlot;
+        t.mode = Hold::Latched;  // once, no repeat; releasing it does nothing
+        if (age > static_cast<uint32_t>(longPressMs_) + kDeferMaxMs)
+            return false;  // passes were held up (a fault): too late to mean anything
+        return fireOrDefer(longOf(first), t.pendingFromOther, nowMs, fired);
+    }
+    if (age < doubleTapMs_)
+        return false;
+    // No second press in time: it was a single press.
+    t.pending = kNoSlot;
+    if (age > static_cast<uint32_t>(doubleTapMs_) + kDeferMaxMs) {
+        if (t.mode == Hold::Waiting)  // passes were held up (a fault): too late to mean anything
+            t.mode = Hold::Latched;
+        return false;
+    }
+    const bool any = fireOrDefer(first, t.pendingFromOther, nowMs, fired);
+    if (t.mode == Hold::Waiting) {
+        t.mode = Hold::Repeat;
+        t.lastFire = nowMs;
+    }
+    return any;
+}
+
 // The held combo changed: pressed, released, or turned into another combo.
 bool Runtime::pressed(PadTaps &t, uint8_t slot, bool fromOther, uint32_t nowMs, FiredPress *fired) {
     bool any = false;
-    if (t.pending != kNoSlot && slot != kNoSlot) {
-        if (slot == t.pending) {
+    if (t.pending != kNoSlot) {
+        if (slot != kNoSlot && slot == t.pending) {
             t.pending = kNoSlot;
             t.mode = Hold::Latched;  // no repeat for a held double tap
             t.quiet = slot;
             t.quietFrom = t.pendingAt;
             return fireOrDefer(doubleOf(slot), fromOther, nowMs, fired);
         }
-        // Another combo: the first one was a single press.
-        any = fireOrDefer(t.pending, t.pendingFromOther, nowMs, fired);
-        t.pending = kNoSlot;
+        if (slot != kNoSlot) {
+            // Another combo: the first one was a single press.
+            any = fireOrDefer(t.pending, t.pendingFromOther, nowMs, fired);
+            t.pending = kNoSlot;
+        } else if (t.mode == Hold::Waiting &&
+                   (!store_.doubleTapMapped(t.pending) || nowMs - t.pendingAt >= doubleTapMs_)) {
+            // Let go before its long press, with no double tap left to wait for: a single press, now.
+            any = fireOrDefer(t.pending, t.pendingFromOther, nowMs, fired);
+            t.pending = kNoSlot;
+        }
     }
 
     if (slot == kNoSlot) {
         t.mode = Hold::None;
-    } else if (!store_.doubleTapMapped(slot)) {
+    } else if (!store_.doubleTapMapped(slot) && !store_.longPressMapped(slot)) {
         t.mode = Hold::Legacy;
     } else if (slot == t.quiet && nowMs - t.quietFrom <= kRepeatMs) {
         t.mode = Hold::Latched;  // a third tap right after a double tap

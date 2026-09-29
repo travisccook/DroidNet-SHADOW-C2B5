@@ -38,13 +38,16 @@ class Runtime {
     static constexpr uint8_t kMaxBytesPerPass = 64;
     static constexpr uint32_t kDeferMaxMs = 250;  // a deferred press older than this is dropped
     static constexpr uint16_t kDoubleTapMs = 350;  // default window from the first press to the second
+    static constexpr uint16_t kLongPressMs = 600;  // default hold for a long press
 
     // `announceFw` is the firmware version for the WCB device announce ("@WDP1 {...}");
     // nullptr turns the announce off. It starts with startAnnounce(). `doubleTapMs` is how
-    // soon after the first press a second one has to come to count as a double tap.
+    // soon after the first press a second one has to come to count as a double tap;
+    // `longPressMs` is how long a combo has to be held for its long press.
     Runtime(MapStore &store, Protocol &protocol, TxQueue &tx, const char *announceFw,
-            uint16_t doubleTapMs = kDoubleTapMs)
-        : store_(store), protocol_(protocol), tx_(tx), announceFw_(announceFw), doubleTapMs_(doubleTapMs) {}
+            uint16_t doubleTapMs = kDoubleTapMs, uint16_t longPressMs = kLongPressMs)
+        : store_(store), protocol_(protocol), tx_(tx), announceFw_(announceFw), doubleTapMs_(doubleTapMs),
+          longPressMs_(longPressMs) {}
 
     // Call once at the end of setup(). `seed` varies the announce intervals (any value).
     void startAnnounce(uint32_t nowMs, uint32_t seed);
@@ -62,9 +65,9 @@ class Runtime {
 
     // Once per pass, after the controllers have been read: the dome controller, then the foot,
     // as the old code did. A combo fires when pressed and again every second while held; the
-    // repeat timer is shared by both controllers. A combo whose double tap is mapped waits
-    // instead (see WIPDocs/COMMAND_MAPPING_DESIGN.md, Double taps): a second press within
-    // the window fires the double tap, anything else fires the combo itself, late. Returns
+    // repeat timer is shared by both controllers. A combo whose double tap or long press is mapped waits
+    // instead (see WIPDocs/COMMAND_MAPPING_DESIGN.md, Double taps and Long presses): a second press within
+    // the window fires the double tap, a hold to the threshold fires the long press, anything else fires the combo itself, late. Returns
     // true, filling `fired`, when a combo fired this pass.
     bool buttons(uint32_t nowMs, const PadState &foot, const PadState &dome, FiredPress *fired);
 
@@ -112,10 +115,10 @@ class Runtime {
     // What the combo held on one controller is doing.
     enum class Hold : uint8_t {
         None,     // nothing held
-        Legacy,   // no double tap mapped: fires at once, then every second (the shared timer)
-        Waiting,  // first press of a double-tap combo, still held
-        Repeat,   // held past the window: fired as a single press, repeats every second
-        Latched,  // double tap fired (or a press ignored after one): nothing until released
+        Legacy,   // no double tap or long press mapped: fires at once, then every second (the shared timer)
+        Waiting,  // first press of a double-tap or long-press combo, still held
+        Repeat,   // held past the window (double tap only): fired as a single press, repeats every second
+        Latched,  // double tap or long press fired (or a press ignored after one): nothing until released
     };
 
     struct PadTaps {
@@ -130,6 +133,7 @@ class Runtime {
     };
 
     bool handlePad(Ctrl ctrl, const PadState &self, const PadState &other, uint32_t nowMs, FiredPress *fired);
+    bool settle(PadTaps &t, uint32_t nowMs, FiredPress *fired);
     bool pressed(PadTaps &t, uint8_t slot, bool fromOther, uint32_t nowMs, FiredPress *fired);
     bool legacy(uint8_t slot, bool fromOther, uint32_t nowMs, FiredPress *fired);
     bool fireOrDefer(uint8_t slot, bool modFromOther, uint32_t nowMs, FiredPress *fired);
@@ -143,6 +147,7 @@ class Runtime {
     TxQueue &tx_;
     const char *announceFw_;
     uint16_t doubleTapMs_;
+    uint16_t longPressMs_;
 
     PadTaps taps_[kCtrlCount];
     uint32_t repeatStart_ = 0;
