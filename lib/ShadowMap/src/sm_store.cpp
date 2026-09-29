@@ -175,7 +175,7 @@ void MapStore::begin() {
         suffix_[0] = '\0';
         seq_ = 0;
         gen_ = static_cast<uint16_t>(rawGenMax + 1);
-        loadDoubleTapDefaults();
+        loadTapDefaults();
         return;
     }
 
@@ -185,7 +185,7 @@ void MapStore::begin() {
     for (uint8_t slot = kSingleSlotCount; slot < kSlotCount; ++slot) {
         while (!io_.ready()) {
         }
-        loadDoubleTap(slot);
+        loadTap(slot);
     }
 }
 
@@ -196,13 +196,21 @@ bool MapStore::doubleTapMapped(uint8_t slot) const {
     return (doubleTaps_[i / 8] & (1u << (i % 8))) != 0;
 }
 
-void MapStore::setDoubleTapMapped(uint8_t slot, bool mapped) {
+bool MapStore::longPressMapped(uint8_t slot) const {
+    if (slot >= kSlotCount)
+        return false;
+    const uint8_t i = static_cast<uint8_t>(slot % kSingleSlotCount);
+    return (longPresses_[i / 8] & (1u << (i % 8))) != 0;
+}
+
+void MapStore::setTapMapped(uint8_t slot, bool mapped) {
+    uint8_t *bits = slotTap(slot) == Tap::LONG ? longPresses_ : doubleTaps_;
     const uint8_t i = static_cast<uint8_t>(slot % kSingleSlotCount);
     const uint8_t bit = static_cast<uint8_t>(1u << (i % 8));
     if (mapped && slotReserved(slot) == Reserved::No)
-        doubleTaps_[i / 8] = static_cast<uint8_t>(doubleTaps_[i / 8] | bit);
+        bits[i / 8] = static_cast<uint8_t>(bits[i / 8] | bit);
     else
-        doubleTaps_[i / 8] = static_cast<uint8_t>(doubleTaps_[i / 8] & ~bit);
+        bits[i / 8] = static_cast<uint8_t>(bits[i / 8] & ~bit);
 }
 
 bool MapStore::defaultMapped(uint8_t slot) const {
@@ -211,17 +219,17 @@ bool MapStore::defaultMapped(uint8_t slot) const {
     return key[0] != '\0';
 }
 
-void MapStore::loadDoubleTapDefaults() {
+void MapStore::loadTapDefaults() {
     for (uint8_t slot = kSingleSlotCount; slot < kSlotCount; ++slot)
-        setDoubleTapMapped(slot, defaultMapped(slot));
+        setTapMapped(slot, defaultMapped(slot));
 }
 
-void MapStore::loadDoubleTap(uint8_t slot) {
+void MapStore::loadTap(uint8_t slot) {
     uint8_t rec[kSlotSize];
     const uint16_t addr = slotAddr(slot);
     for (uint8_t i = 0; i < kSlotSize; ++i)
         rec[i] = io_.read(static_cast<uint16_t>(addr + i));
-    setDoubleTapMapped(slot, slotRecordValid(rec, slot, gen_) ? rec[0] != 0 : defaultMapped(slot));
+    setTapMapped(slot, slotRecordValid(rec, slot, gen_) ? rec[0] != 0 : defaultMapped(slot));
 }
 
 void MapStore::applyHeader(const uint8_t *hdr, uint8_t index) {
@@ -450,7 +458,7 @@ void MapStore::finishJob(bool ok) {
         const uint16_t oldGen = gen_;
         applyHeader(jobData_, jobIndex_);
         if (gen_ != oldGen)
-            loadDoubleTapDefaults();  // a new generation: every slot reads as its default
+            loadTapDefaults();  // a new generation: every slot reads as its default
         if (pendingSlot_ != kNoSlot) {
             const uint8_t slot = pendingSlot_;
             pendingSlot_ = kNoSlot;
@@ -460,8 +468,8 @@ void MapStore::finishJob(bool ok) {
         completion_ = Completion::Done;
         return;
     }
-    if (slotTap(jobIndex_) == Tap::DOUBLE)
-        loadDoubleTap(jobIndex_);  // what's really there now, written or not (the EEPROM is idle: step() checked)
+    if (slotTap(jobIndex_) != Tap::SINGLE)
+        loadTap(jobIndex_);  // what's really there now, written or not (the EEPROM is idle: step() checked)
     completion_ = ok ? Completion::Done : Completion::Failed;
 }
 

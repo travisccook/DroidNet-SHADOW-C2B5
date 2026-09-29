@@ -465,7 +465,7 @@ static void test_double_taps_follow_the_single_slots() {
     TEST_ASSERT_EQUAL_UINT8('t', eeprom->peek(2 * MapStore::kHeaderSize + dbl * MapStore::kSlotSize));
     TEST_ASSERT_TRUE(2 * MapStore::kHeaderSize + 72 * MapStore::kSlotSize <= 64 + dbl * MapStore::kSlotSize);
     TEST_ASSERT_EQUAL_UINT8(72, eeprom->mem[3]);
-    TEST_ASSERT_EQUAL_UINT16(2656, MapStore::kFootprint);
+    TEST_ASSERT_EQUAL_UINT16(3952, MapStore::kFootprint);
 
     MapStore rebooted(*eeprom, kTestDefaults, kTestDefaultCount);
     rebooted.begin();
@@ -519,6 +519,72 @@ static void test_double_tap_defaults_and_failed_writes() {
     TEST_ASSERT_EQUAL_STRING("scantwice", key);
 }
 
+// Long presses: the third bank, after the double taps, with their own RAM copy.
+static void test_long_presses_follow_the_double_taps() {
+    const uint8_t lng = slotIndex(Ctrl::F, Mod::L1, Btn::UP, Tap::LONG);
+    const uint8_t dbl = slotIndex(Ctrl::F, Mod::L1, Btn::UP, Tap::DOUBLE);
+    MapStore store(*eeprom, kTestDefaults, kTestDefaultCount);
+    store.begin();
+    TEST_ASSERT_FALSE(store.longPressMapped(kSlotFootL1Up));
+    expectKey(store, lng, "", Source::Default);
+
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MapStore::Result::Ok), static_cast<uint8_t>(store.beginSet(lng, "quiet")));
+    TEST_ASSERT_FALSE(store.longPressMapped(kSlotFootL1Up));  // not until it's written
+    runUntilIdle(store);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MapStore::Completion::Done), static_cast<uint8_t>(store.takeCompletion()));
+    TEST_ASSERT_TRUE(store.longPressMapped(kSlotFootL1Up));
+    TEST_ASSERT_TRUE(store.longPressMapped(lng));
+    TEST_ASSERT_FALSE(store.doubleTapMapped(kSlotFootL1Up));  // the banks are separate
+    expectKey(store, lng, "quiet", Source::Eeprom);
+    expectKey(store, dbl, "", Source::Default);
+
+    // Where it lives: after the double taps, and the header still says 72.
+    TEST_ASSERT_EQUAL_UINT16(2656, 2 * MapStore::kHeaderSize + 144 * MapStore::kSlotSize);
+    TEST_ASSERT_EQUAL_UINT8('q', eeprom->peek(2 * MapStore::kHeaderSize + lng * MapStore::kSlotSize));
+    TEST_ASSERT_EQUAL_UINT8(72, eeprom->mem[3]);
+
+    MapStore rebooted(*eeprom, kTestDefaults, kTestDefaultCount);
+    rebooted.begin();
+    TEST_ASSERT_TRUE(rebooted.longPressMapped(kSlotFootL1Up));
+    expectKey(rebooted, lng, "quiet", Source::Eeprom);
+
+    set(rebooted, dbl, "twice");
+    TEST_ASSERT_TRUE(rebooted.doubleTapMapped(kSlotFootL1Up));
+    TEST_ASSERT_TRUE(rebooted.longPressMapped(kSlotFootL1Up));
+    set(rebooted, lng, "");
+    TEST_ASSERT_FALSE(rebooted.longPressMapped(kSlotFootL1Up));
+    TEST_ASSERT_TRUE(rebooted.doubleTapMapped(kSlotFootL1Up));
+    set(rebooted, lng, "again");
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MapStore::Result::Ok), static_cast<uint8_t>(rebooted.beginRevert(lng)));
+    runUntilIdle(rebooted);
+    TEST_ASSERT_FALSE(rebooted.longPressMapped(kSlotFootL1Up));
+    set(rebooted, lng, "again");
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MapStore::Result::Ok), static_cast<uint8_t>(rebooted.beginDefaults()));
+    runUntilIdle(rebooted);
+    TEST_ASSERT_FALSE(rebooted.longPressMapped(kSlotFootL1Up));
+    TEST_ASSERT_FALSE(rebooted.doubleTapMapped(kSlotFootL1Up));
+    expectKey(rebooted, lng, "", Source::Default);
+
+    // L3 has no long press; the over-speed combo's long press is over-speed too.
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MapStore::Result::Reserved),
+                            static_cast<uint8_t>(rebooted.beginSet(slotIndex(Ctrl::D, Mod::NONE, Btn::L3, Tap::LONG), "x")));
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MapStore::Result::Reserved),
+                            static_cast<uint8_t>(rebooted.beginSet(slotIndex(Ctrl::F, Mod::L1, Btn::L3, Tap::LONG), "x")));
+}
+
+// A long press that doesn't verify: the RAM copy follows what's really in EEPROM.
+static void test_long_press_failed_write_follows_eeprom() {
+    const uint8_t lng = slotIndex(Ctrl::D, Mod::CROSS, Btn::LEFT, Tap::LONG);
+    MapStore store(*eeprom, kTestDefaults, kTestDefaultCount);
+    store.begin();
+    set(store, kSlotFootNoneDown, "angrysound");  // formats the EEPROM
+    eeprom->stuckAddr = 2 * MapStore::kHeaderSize + lng * MapStore::kSlotSize;
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MapStore::Result::Ok), static_cast<uint8_t>(store.beginSet(lng, "abc")));
+    runUntilIdle(store);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MapStore::Completion::Failed), static_cast<uint8_t>(store.takeCompletion()));
+    TEST_ASSERT_FALSE(store.longPressMapped(kSlotDomeCrossLeft));  // a bad record reads as its default: none
+}
+
 int runAllTests() {
     UNITY_BEGIN();
     RUN_TEST(test_blank_eeprom_reads_defaults);
@@ -540,5 +606,7 @@ int runAllTests() {
     RUN_TEST(test_power_cut_during_revert);
     RUN_TEST(test_double_taps_follow_the_single_slots);
     RUN_TEST(test_double_tap_defaults_and_failed_writes);
+    RUN_TEST(test_long_presses_follow_the_double_taps);
+    RUN_TEST(test_long_press_failed_write_follows_eeprom);
     return UNITY_END();
 }
