@@ -176,7 +176,8 @@ long press is mapped waits, and starts its timer from the press:
   late: one whose moment (the threshold, the release, or the window's close, whichever it waited
   for) passed more than 250 ms (`kDeferMaxMs`) before the next pass is dropped. For the long press
   that is threshold + 250 ms. The check counts from that moment, not from the press: a single tap
-  released at 0.5 s is fresh, although the press is 0.5 s old.
+  released at 0.5 s is fresh, although the press is 0.5 s old. So a first pass more than 850 ms
+  after the press drops it, held or released, and another combo on that pass fires alone.
 - **Whether a combo has a long press** comes from a RAM copy (9 bytes, one bit per slot), loaded
   at boot and updated when a write finishes, like the double taps' copy. A press never waits on
   the EEPROM.

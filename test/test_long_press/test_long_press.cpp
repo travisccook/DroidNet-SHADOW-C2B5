@@ -252,6 +252,49 @@ static void test_release_after_a_gap_with_a_double_tap_mapped_is_a_single() {
     TEST_ASSERT_EQUAL_UINT32(1, commands());
 }
 
+static void test_stale_single_after_a_gap_is_dropped_when_still_held() {
+    hold(0, 100, held(kHeldUp));
+    pass(5000, held(kHeldUp));
+    hold(5001, 6000, held(0));
+    TEST_ASSERT_EQUAL_UINT32(0, commands());
+}
+
+static void test_stale_single_after_a_gap_is_dropped_when_released() {
+    hold(0, 100, held(kHeldUp));
+    pass(5000, held(0));
+    hold(5001, 6000, held(0));
+    TEST_ASSERT_EQUAL_UINT32(0, commands());
+}
+
+static void test_stale_single_is_dropped_but_another_combo_fires_alone() {
+    hold(0, 100, held(kHeldUp));
+    TEST_ASSERT_TRUE(pass(5000, held(kHeldDown)));
+    TEST_ASSERT_EQUAL_UINT32(1, commands());
+    TEST_ASSERT_EQUAL_STRING(";W1;Cangrysound", lastCommand());
+    hold(5001, 7000, held(0));
+    TEST_ASSERT_EQUAL_UINT32(1, commands());
+}
+
+static void test_stale_single_release_boundary() {
+    hold(0, 100, held(kHeldUp));
+    TEST_ASSERT_TRUE(pass(kLong + Runtime::kDeferMaxMs, held(0)));  // exactly 850: fresh
+    TEST_ASSERT_EQUAL_STRING(";W1;Chappysound", lastCommand());
+    setUp();
+    mapSlot(kUpL, "quiet");
+    hold(0, 100, held(kHeldUp));
+    TEST_ASSERT_FALSE(pass(kLong + Runtime::kDeferMaxMs + 1, held(0)));  // 851: dropped
+    hold(kLong + Runtime::kDeferMaxMs + 2, 3000, held(0));
+    TEST_ASSERT_EQUAL_UINT32(0, commands());
+}
+
+static void test_stale_single_with_a_double_tap_mapped_is_dropped() {
+    mapSlot(kUp2, "twice");
+    hold(0, 100, held(kHeldUp));
+    pass(5000, held(0));
+    hold(5001, 6000, held(0));
+    TEST_ASSERT_EQUAL_UINT32(0, commands());
+}
+
 static void test_a_tap_after_a_long_press_is_an_ordinary_press() {
     hold(0, kLong, held(kHeldUp));
     hold(kLong + 1, 999, held(0));
@@ -345,6 +388,11 @@ int runAllTests() {
     RUN_TEST(test_release_after_a_gap_past_the_threshold_is_a_single);
     RUN_TEST(test_modifier_after_a_gap_past_the_threshold_is_a_single_then_the_combo);
     RUN_TEST(test_release_after_a_gap_with_a_double_tap_mapped_is_a_single);
+    RUN_TEST(test_stale_single_after_a_gap_is_dropped_when_still_held);
+    RUN_TEST(test_stale_single_after_a_gap_is_dropped_when_released);
+    RUN_TEST(test_stale_single_is_dropped_but_another_combo_fires_alone);
+    RUN_TEST(test_stale_single_release_boundary);
+    RUN_TEST(test_stale_single_with_a_double_tap_mapped_is_dropped);
     RUN_TEST(test_a_tap_after_a_long_press_is_an_ordinary_press);
     RUN_TEST(test_no_long_press_inside_the_quiet_period_after_a_double_tap);
     RUN_TEST(test_staleness_boundary);
