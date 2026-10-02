@@ -40,6 +40,13 @@ constexpr uint16_t crc16Text(uint16_t state, const char *s) {
                            s + 1);
 }
 
+namespace detail {
+// The byte-plane tables (sm_crc.cpp), each 256-aligned in the first 64 KB of flash, where the AVR
+// block code reaches them with LPM. Declared here for test_avr_crc_asm.
+extern const uint8_t kCrc32Planes[4][256];
+extern const uint8_t kCrc16Planes[2][256];
+}  // namespace detail
+
 static_assert(crc32Text(kCrc32Init, "123456789") == static_cast<uint32_t>(~0xCBF43926UL), "CRC32 check value");
 static_assert(crc16Text(kCrc16Init, "123456789") == 0x29B1, "CRC16 (CCITT-FALSE) check value");
 
