@@ -1,0 +1,275 @@
+;W20,;S0@SM READY v3 fw=sim slots=216 gen=0 fmt=0 pads=FD *BE5C0949
+!!IDLE 90
+;W20,;S0@SM OK EVENTS 1 *72286E5B
+!!IDLE 146
+;W20,;S0@SM OK SET F NONE UPL zyxwvutsrqponml *FA95BD37
+!!IDLE 454
+;W20,;S0@SM SLOT F CIRCLE RIGHTL - default def=- *AD85CDA3
+@WDP1 {"type":"Shadow","fw":"sim"}
+;W1;Czyxwvutsrqponml
+;W20,;S0@SM PRESS F NONE UPL zyxwvutsrqponml eeprom *0E14583B
+!!IDLE 1154
+!!IDLE 2254
+;W1;Cscaredsound
+;W20,;S0@SM PRESS F NONE LEFT scaredsound default *22B7AFCD
+;W20,;S0@SM OK SET F NONE LEFT zyxwvutsrqponml *77890F7D
+!!IDLE 3433
+;W1;Cangrysound
+;W20,;S0@SM PRESS F NONE DOWN angrysound default *312F3865
+;W20,;S0@SM OK SET F NONE DOWN pressed *E3D32B84
+!!IDLE 3595
+!!IDLE 4695
+;W1;Cpressed
+;W20,;S0@SM PRESS F NONE DOWN pressed eeprom *9BA1549D
+;W20,;S0@SM BAT F=- D=- fs=- ds=- up=5 hb=30 *17726BFD
+;W20,;S0@SM READY v3 fw=sim slots=216 gen=0 fmt=1 pads=FD *A9271D0A
+!!IDLE 5888
+;W1;Cextremehappysou
+;W20,;S0@SM PRESS F L1 UP extremehappysou default *D78BC365
+;W20,;S0@SM SLOT F NONE UP happysound default def=happysound *FB03AD8F
+;W20,;S0@SM SLOT D L1 L3 frontholocenter default def=frontholocenter *109770FF
+;W20,;S0@SM SLOT F NONE RIGHT sadsound default def=sadsound *5051D11E
+;W20,;S0@SM SLOT F NONE DOWN pressed eeprom def=angrysound *C46CE41B
+;W20,;S0@SM SLOT F NONE LEFT zyxwvutsrqponml eeprom def=scaredsound *53E58C61
+;W20,;S0@SM SLOT F NONE L3 - default def=- *3439034E
+;W20,;S0@SM SLOT F NONE PS - reserved res=psgate *8F86C150
+;W20,;S0@SM SLOT F L1 UP extremehappysou default def=extremehappysou *C1F6D8E3
+;W20,;S0@SM SLOT F L1 RIGHT extremesadsound default def=extremesadsound *277084C8
+;W20,;S0@SM SLOT F L1 DOWN extremeangrysou default def=extremeangrysou *EDF8D5C5
+;W20,;S0@SM SLOT F L1 LEFT scream default def=scream *9FBB660C
+;W20,;S0@SM SLOT F L1 L3 - reserved res=overspeed *EE899D82
+;W20,;S0@SM SLOT F L1 PS - default def=- *9FD6A3AA
+;W20,;S0@SM SLOT F L2 UP imperialmarch default def=imperialmarch *EE7237C5
+;W20,;S0@SM SLOT F L2 RIGHT disco default def=disco *E9257E2F
+;W20,;S0@SM SLOT F L2 DOWN jeditheme default def=jeditheme *868297E1
+;W20,;S0@SM SLOT F L2 LEFT cantina default def=cantina *30768044
+;W20,;S0@SM SLOT F L2 L3 - default def=- *71C09C7C
+;W20,;S0@SM SLOT F L2 PS mahna default def=mahna *0D94AEAD
+;W20,;S0@SM SLOT F PS UP - default def=- *B1930079
+;W20,;S0@SM SLOT F PS RIGHT - default def=- *06DA3BC6
+;W20,;S0@SM SLOT F PS DOWN - default def=- *CCC15A25
+;W20,;S0@SM SLOT F PS LEFT - default def=- *C8833B3E
+;W20,;S0@SM SLOT F PS L3 - default def=- *474C4806
+;W20,;S0@SM SLOT F PS PS - reserved res=psgate *49F8A6AE
+;W20,;S0@SM SLOT F CIRCLE UP yes default def=yes *62A0974B
+;W20,;S0@SM SLOT F CIRCLE RIGHT love default def=love *2B9EDE5F
+;W20,;S0@SM SLOT F CIRCLE DOWN no default def=no *C6140FED
+;W20,;S0@SM SLOT F CIRCLE LEFT alarm default def=alarm *F05F44C6
+;W20,;S0@SM SLOT F CIRCLE L3 - default def=- *18214169
+;W20,;S0@SM SLOT F CIRCLE PS - reserved res=psgate *13E63F03
+;W20,;S0@SM SLOT F CROSS UP leia default def=leia *6AA9A0C1
+;W20,;S0@SM SLOT F CROSS RIGHT shortcircuit default def=shortcircuit *FA9EB23D
+;W20,;S0@SM SLOT F CROSS DOWN - default def=- *C8A09EB9
+;W20,;S0@SM SLOT F CROSS LEFT - default def=- *CCE2FFA2
+;W20,;S0@SM SLOT F CROSS L3 - default def=- *75F3CBF2
+;W20,;S0@SM SLOT F CROSS PS - reserved res=psgate *534358D1
+;W20,;S0@SM SLOT D NONE UP singlemuse default def=singlemuse *E98483A5
+;W20,;S0@SM SLOT D NONE RIGHT holotwitch default def=holotwitch *55C2B5A8
+;W20,;S0@SM SLOT D NONE DOWN resetsilent default def=resetsilent *EBFFECB9
+;W20,;S0@SM SLOT D NONE LEFT resetchatty default def=resetchatty *E7028621
+;W20,;S0@SM SLOT D NONE L3 - default def=- *A45F2513
+;W20,;S0@SM SLOT D NONE PS - reserved res=psgate *924910F2
+;W20,;S0@SM SLOT D L1 UP frontholoup default def=frontholoup *84E8CD1F
+;W20,;S0@SM SLOT D L1 RIGHT frontholoright default def=frontholoright *0C7265BD
+;W20,;S0@SM SLOT D L1 DOWN frontholodown default def=frontholodown *51ABCBF6
+;W20,;S0@SM SLOT D L1 LEFT fronthololeft default def=fronthololeft *A35149F5
+;W20,;S0@SM SLOT D L1 L3 frontholocenter default def=frontholocenter *109770FF
+;W20,;S0@SM SLOT D L1 PS - default def=- *72407043
+;W20,;S0@SM SLOT D L2 UP GDdownload default def=GDdownload *F0AB5524
+;W20,;S0@SM SLOT D L2 RIGHT GDsuccess default def=GDsuccess *C1490FEF
+;W20,;S0@SM SLOT D L2 DOWN redlight default def=redlight *3041F014
+;W20,;S0@SM SLOT D L2 LEFT GDcollar default def=GDcollar *1590E93C
+;W20,;S0@SM SLOT D L2 L3 - default def=- *9C564F95
+;W20,;S0@SM SLOT D L2 PS - default def=- *DDE93D89
+;W20,;S0@SM SLOT D PS UP - default def=- *5C05D390
+;W20,;S0@SM SLOT D PS RIGHT - default def=- *139070A9
+;W20,;S0@SM SLOT D PS DOWN - default def=- *5CA77C78
+;W20,;S0@SM SLOT D PS LEFT - default def=- *58E51D63
+;W20,;S0@SM SLOT D PS L3 - default def=- *AADA9BEF
+;W20,;S0@SM SLOT D PS PS - reserved res=psgate *8FF714E6
+;W20,;S0@SM SLOT D CIRCLE UP - default def=- *33E63F94
+;W20,;S0@SM SLOT D CIRCLE RIGHT - default def=- *DF51D738
+;W20,;S0@SM SLOT D CIRCLE DOWN - default def=- *917778CC
+;W20,;S0@SM SLOT D CIRCLE LEFT - default def=- *953519D7
+;W20,;S0@SM SLOT D CIRCLE L3 - default def=- *C53977EB
+;W20,;S0@SM SLOT D CIRCLE PS - reserved res=psgate *7E031EE5
+;W20,;S0@SM SLOT D CROSS UP - default def=- *9666C8E2
+;W20,;S0@SM SLOT D CROSS RIGHT GDc2song default def=GDc2song *85ABC78C
+;W20,;S0@SM SLOT D CROSS DOWN GDrecruitsong default def=GDrecruitsong *0D153ECB
+;W20,;S0@SM SLOT D CROSS LEFT scanning default def=scanning *B115A242
+;W20,;S0@SM SLOT D CROSS L3 - default def=- *60B9809D
+;W20,;S0@SM SLOT D CROSS PS - reserved res=psgate *6B8655C4
+;W20,;S0@SM SLOT F NONE UP2 - default def=- *EC1B25DC
+;W20,;S0@SM SLOT F NONE RIGHT2 - default def=- *762DC1D5
+;W20,;S0@SM SLOT F NONE DOWN2 - default def=- *BBA419C6
+;W20,;S0@SM SLOT F NONE LEFT2 - default def=- *31C5924B
+;W20,;S0@SM SLOT F NONE L32 - reserved res=stick *C19A594C
+;W20,;S0@SM SLOT F NONE PS2 - reserved res=psgate *DD6F1428
+;W20,;S0@SM SLOT F L1 UP2 - default def=- *5F970F20
+;W20,;S0@SM SLOT F L1 RIGHT2 - default def=- *419648F1
+;W20,;S0@SM SLOT F L1 DOWN2 - default def=- *D816CD2D
+;W20,;S0@SM SLOT F L1 LEFT2 - default def=- *527746A0
+;W20,;S0@SM SLOT F L1 L32 - reserved res=overspeed *1FA750B8
+;W20,;S0@SM SLOT F L1 PS2 - default def=- *8B9B5FF8
+;W20,;S0@SM SLOT F L2 UP2 - default def=- *24898DC3
+;W20,;S0@SM SLOT F L2 RIGHT2 - default def=- *1988E1D9
+;W20,;S0@SM SLOT F L2 DOWN2 - default def=- *AEF3F410
+;W20,;S0@SM SLOT F L2 LEFT2 - default def=- *24927F9D
+;W20,;S0@SM SLOT F L2 L32 - reserved res=stick *5641592D
+;W20,;S0@SM SLOT F L2 PS2 - default def=- *F085DD1B
+;W20,;S0@SM SLOT F PS UP2 - default def=- *946F9935
+;W20,;S0@SM SLOT F PS RIGHT2 - default def=- *CF067E13
+;W20,;S0@SM SLOT F PS DOWN2 - default def=- *F6CFD6B0
+;W20,;S0@SM SLOT F PS LEFT2 - default def=- *7CAE5D3D
+;W20,;S0@SM SLOT F PS L32 - reserved res=stick *07E43EB2
+;W20,;S0@SM SLOT F PS PS2 - reserved res=psgate *87ACB554
+;W20,;S0@SM SLOT F CIRCLE UP2 - default def=- *493D88F5
+;W20,;S0@SM SLOT F CIRCLE RIGHT2 - default def=- *8815FB46
+;W20,;S0@SM SLOT F CIRCLE DOWN2 - default def=- *5785FC5E
+;W20,;S0@SM SLOT F CIRCLE LEFT2 - default def=- *DDE477D3
+;W20,;S0@SM SLOT F CIRCLE L32 - reserved res=stick *5DFAA71F
+;W20,;S0@SM SLOT F CIRCLE PS2 - reserved res=psgate *2F917498
+;W20,;S0@SM SLOT F CROSS UP2 - default def=- *2E8D10B3
+;W20,;S0@SM SLOT F CROSS RIGHT2 - default def=- *8EFBB9CD
+;W20,;S0@SM SLOT F CROSS DOWN2 - default def=- *0F72681B
+;W20,;S0@SM SLOT F CROSS LEFT2 - default def=- *8513E396
+;W20,;S0@SM SLOT F CROSS L32 - reserved res=stick *1D5FC0CD
+;W20,;S0@SM SLOT F CROSS PS2 - reserved res=psgate *470C6207
+;W20,;S0@SM SLOT D NONE UP2 - default def=- *F9516EB3
+;W20,;S0@SM SLOT D NONE RIGHT2 - default def=- *B022739D
+;W20,;S0@SM SLOT D NONE DOWN2 - default def=- *B8CFE3FC
+;W20,;S0@SM SLOT D NONE LEFT2 - default def=- *32AE6871
+;W20,;S0@SM SLOT D NONE L32 - reserved res=stick *DC5588EE
+;W20,;S0@SM SLOT D NONE PS2 - reserved res=psgate *E5AA193D
+;W20,;S0@SM SLOT D L1 UP2 - default def=- *86ACC32F
+;W20,;S0@SM SLOT D L1 RIGHT2 - default def=- *9C8E7E73
+;W20,;S0@SM SLOT D L1 DOWN2 - default def=- *CD5C8642
+;W20,;S0@SM SLOT D L1 LEFT2 - default def=- *473D0DCF
+;W20,;S0@SM SLOT D L1 L32 - reserved res=stick *6219069D
+;W20,;S0@SM SLOT D L1 PS2 - default def=- *52A093F7
+;W20,;S0@SM SLOT D L2 UP2 - default def=- *FDB241CC
+;W20,;S0@SM SLOT D L2 RIGHT2 - default def=- *C490D75B
+;W20,;S0@SM SLOT D L2 DOWN2 - default def=- *BBB9BF7F
+;W20,;S0@SM SLOT D L2 LEFT2 - default def=- *31D834F2
+;W20,;S0@SM SLOT D L2 L32 - reserved res=stick *904EEB65
+;W20,;S0@SM SLOT D L2 PS2 - default def=- *29BE1114
+;W20,;S0@SM SLOT D PS UP2 - default def=- *4D54553A
+;W20,;S0@SM SLOT D PS RIGHT2 - default def=- *121E4891
+;W20,;S0@SM SLOT D PS DOWN2 - default def=- *E3859DDF
+;W20,;S0@SM SLOT D PS LEFT2 - default def=- *69E41652
+;W20,;S0@SM SLOT D PS L32 - reserved res=stick *C1EB8CFA
+;W20,;S0@SM SLOT D PS PS2 - reserved res=psgate *FF6D7344
+;W20,;S0@SM SLOT D CIRCLE UP2 - default def=- *4A5672CF
+;W20,;S0@SM SLOT D CIRCLE RIGHT2 - default def=- *95DA2AE4
+;W20,;S0@SM SLOT D CIRCLE DOWN2 - default def=- *2F443A4E
+;W20,;S0@SM SLOT D CIRCLE LEFT2 - default def=- *A525B1C3
+;W20,;S0@SM SLOT D CIRCLE L32 - reserved res=stick *301F86F9
+;W20,;S0@SM SLOT D CIRCLE PS2 - reserved res=psgate *6695D6F4
+;W20,;S0@SM SLOT D CROSS UP2 - default def=- *F3952631
+;W20,;S0@SM SLOT D CROSS RIGHT2 - default def=- *F63A7FDD
+;W20,;S0@SM SLOT D CROSS DOWN2 - default def=- *C97DDA53
+;W20,;S0@SM SLOT D CROSS LEFT2 - default def=- *431C51DE
+;W20,;S0@SM SLOT D CROSS L32 - reserved res=stick *259ACDD8
+;W20,;S0@SM SLOT D CROSS PS2 - reserved res=psgate *2AE943E1
+;W20,;S0@SM SLOT F NONE UPL zyxwvutsrqponml eeprom def=- *A327F9D7
+;W20,;S0@SM SLOT F NONE RIGHTL - default def=- *53BDF730
+;W20,;S0@SM SLOT F NONE DOWNL - default def=- *9E342F23
+;W20,;S0@SM SLOT F NONE LEFTL - default def=- *1455A4AE
+;W20,;S0@SM SLOT F NONE L3L - reserved res=stick *E10EDE89
+;W20,;S0@SM SLOT F NONE PSL - reserved res=psgate *3641B690
+;W20,;S0@SM SLOT F L1 UPL - default def=- *7A0739C5
+;W20,;S0@SM SLOT F L1 RIGHTL - default def=- *64067E14
+;W20,;S0@SM SLOT F L1 DOWNL - default def=- *FD86FBC8
+;W20,;S0@SM SLOT F L1 LEFTL - default def=- *77E77045
+;W20,;S0@SM SLOT F L1 L3L - reserved res=overspeed *940D2C5F
+;W20,;S0@SM SLOT F L1 PSL - default def=- *AE0B691D
+;W20,;S0@SM SLOT F L2 UPL - default def=- *0119BB26
+;W20,;S0@SM SLOT F L2 RIGHTL - default def=- *3C18D73C
+;W20,;S0@SM SLOT F L2 DOWNL - default def=- *8B63C2F5
+;W20,;S0@SM SLOT F L2 LEFTL - default def=- *01024978
+;W20,;S0@SM SLOT F L2 L3L - reserved res=stick *76D5DEE8
+;W20,;S0@SM SLOT F L2 PSL - default def=- *D515EBFE
+;W20,;S0@SM SLOT F PS UPL - default def=- *B1FFAFD0
+;W20,;S0@SM SLOT F PS RIGHTL - default def=- *EA9648F6
+;W20,;S0@SM SLOT F PS DOWNL - default def=- *D35FE055
+;W20,;S0@SM SLOT F PS LEFTL - default def=- *593E6BD8
+;W20,;S0@SM SLOT F PS L3L - reserved res=stick *2770B977
+;W20,;S0@SM SLOT F PS PSL - reserved res=psgate *6C8217EC
+;W20,;S0@SM SLOT F CIRCLE UPL - default def=- *6CADBE10
+;W20,;S0@SM SLOT F CIRCLE RIGHTL - default def=- *AD85CDA3
+;W20,;S0@SM SLOT F CIRCLE DOWNL - default def=- *7215CABB
+;W20,;S0@SM SLOT F CIRCLE LEFTL - default def=- *F8744136
+;W20,;S0@SM SLOT F CIRCLE L3L - reserved res=stick *7D6E20DA
+;W20,;S0@SM SLOT F CIRCLE PSL - reserved res=psgate *C4BFD620
+;W20,;S0@SM SLOT F CROSS UPL - default def=- *0B1D2656
+;W20,;S0@SM SLOT F CROSS RIGHTL - default def=- *AB6B8F28
+;W20,;S0@SM SLOT F CROSS DOWNL - default def=- *2AE25EFE
+;W20,;S0@SM SLOT F CROSS LEFTL - default def=- *A083D573
+;W20,;S0@SM SLOT F CROSS L3L - reserved res=stick *3DCB4708
+;W20,;S0@SM SLOT F CROSS PSL - reserved res=psgate *AC22C0BF
+;W20,;S0@SM SLOT D NONE UPL - default def=- *DCC15856
+;W20,;S0@SM SLOT D NONE RIGHTL - default def=- *95B24578
+;W20,;S0@SM SLOT D NONE DOWNL - default def=- *9D5FD519
+;W20,;S0@SM SLOT D NONE LEFTL - default def=- *173E5E94
+;W20,;S0@SM SLOT D NONE L3L - reserved res=stick *FCC10F2B
+;W20,;S0@SM SLOT D NONE PSL - reserved res=psgate *0E84BB85
+;W20,;S0@SM SLOT D L1 UPL - default def=- *A33CF5CA
+;W20,;S0@SM SLOT D L1 RIGHTL - default def=- *B91E4896
+;W20,;S0@SM SLOT D L1 DOWNL - default def=- *E8CCB0A7
+;W20,;S0@SM SLOT D L1 LEFTL - default def=- *62AD3B2A
+;W20,;S0@SM SLOT D L1 L3L - reserved res=stick *428D8158
+;W20,;S0@SM SLOT D L1 PSL - default def=- *7730A512
+;W20,;S0@SM SLOT D L2 UPL - default def=- *D8227729
+;W20,;S0@SM SLOT D L2 RIGHTL - default def=- *E100E1BE
+;W20,;S0@SM SLOT D L2 DOWNL - default def=- *9E29899A
+;W20,;S0@SM SLOT D L2 LEFTL - default def=- *14480217
+;W20,;S0@SM SLOT D L2 L3L - reserved res=stick *B0DA6CA0
+;W20,;S0@SM SLOT D L2 PSL - default def=- *0C2E27F1
+;W20,;S0@SM SLOT D PS UPL - default def=- *68C463DF
+;W20,;S0@SM SLOT D PS RIGHTL - default def=- *378E7E74
+;W20,;S0@SM SLOT D PS DOWNL - default def=- *C615AB3A
+;W20,;S0@SM SLOT D PS LEFTL - default def=- *4C7420B7
+;W20,;S0@SM SLOT D PS L3L - reserved res=stick *E17F0B3F
+;W20,;S0@SM SLOT D PS PSL - reserved res=psgate *1443D1FC
+;W20,;S0@SM SLOT D CIRCLE UPL - default def=- *6FC6442A
+;W20,;S0@SM SLOT D CIRCLE RIGHTL - default def=- *B04A1C01
+;W20,;S0@SM SLOT D CIRCLE DOWNL - default def=- *0AD40CAB
+;W20,;S0@SM SLOT D CIRCLE LEFTL - default def=- *80B58726
+;W20,;S0@SM SLOT D CIRCLE L3L - reserved res=stick *108B013C
+;W20,;S0@SM SLOT D CIRCLE PSL - reserved res=psgate *8DBB744C
+;W20,;S0@SM SLOT D CROSS UPL - default def=- *D60510D4
+;W20,;S0@SM SLOT D CROSS RIGHTL - default def=- *D3AA4938
+;W20,;S0@SM SLOT D CROSS DOWNL - default def=- *ECEDECB6
+;W20,;S0@SM SLOT D CROSS LEFTL - default def=- *668C673B
+;W20,;S0@SM SLOT D CROSS L3L - reserved res=stick *050E4A1D
+;W20,;S0@SM SLOT D CROSS PSL - reserved res=psgate *C1C7E159
+;W20,;S0@SM END DUMP 216 *F897F85E
+!!IDLE 18704
+!!IDLE 19204
+;W1;Cpressed
+;W20,;S0@SM PRESS F NONE DOWN pressed eeprom *9BA1549D
+!!IDLE 19272
+@WDP1 {"type":"Shadow","fw":"sim"}
+;W20,;S0@SM BAT F=- D=- fs=- ds=- up=35 hb=30 *DF2F6898
+!!IDLE 39272
+;W1;Cextremehappysou
+;W20,;S0@SM PRESS F L1 UP extremehappysou default *D78BC365
+;W20,;S0@SM SUM 7FAD5294 slots=216 *E1360E45
+!!IDLE 39766
+!!IDLE 39866
+!!IDLE 39868
+;W20,;S0@SM BAT F=OK D=OK fs=5 ds=5 up=41 hb=30 *BF04495F
+!!IDLE 45868
+;W20,;S0@SM BAT F=OK D=OK fs=5 ds=5 up=45 hb=30 *4B4B6D4C
+;W20,;S0@SM CFG pre=3B57313B43 suf=- *033F6222
+;W1;Czyxwvutsrqponml
+;W20,;S0@SM PRESS F NONE UPL zyxwvutsrqponml eeprom *0E14583B
+!!IDLE 46668
+!!IDLE 47768
+;W1;Czyxwvutsrqponml
+;W20,;S0@SM PRESS F NONE LEFT zyxwvutsrqponml eeprom *D4BC47A3
+;W20,;S0@SM OK DEFAULTS gen=1 *426F85CC
+!!IDLE 47962
+!!IDLE 49062
+;W20,;S0@SM SUM 0A1B0A26 slots=216 *77757C69
+!!IDLE 49556
