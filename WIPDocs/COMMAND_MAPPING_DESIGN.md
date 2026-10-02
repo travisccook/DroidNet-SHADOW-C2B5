@@ -440,42 +440,78 @@ The library has no Arduino dependency, so it builds and tests on the host.
 
 ## Timing and memory
 
-- **Loop time.** Worst-case time the mapping adds to one loop pass, measured on the emulated
-  ATmega2560 at 16 MHz:
-  - handling a request: 0.61 ms
-  - a pass during a SET: 0.55 ms (a double-tap slot's write also refreshes its bit in RAM)
-  - a pass during a DUMP: 0.93 ms
-  - a button press: 0.21 ms; the worst pass of a double tap: 0.43 ms
+- **The per-pass rule.** A loop pass is `readUSB`, the motors, `mappedButtons()`,
+  `toggleSettings()`, `serviceMapping()` (pump the WCB, pump USB, batteries, `Runtime::service`),
+  `printOutput()`. Presses can't wait (their timing rules are fixed), so everything else fits
+  around them:
+  - A request is taken in only in a pass that fired no press, read fewer than 16 bytes and
+    doesn't finish an EEPROM job (`MapStore::finishDue`), one a pass, and nothing more is read
+    after it. A pass that fired reads 16 bytes at most over both ports. A line held for a later
+    pass, and the bytes behind it, wait in the UART.
+  - In a pass with none of that, one background unit runs, the first that has work: the
+    announce, the protocol's next line (a controller event, the SLOT reply in hand, the SUM
+    reply, `END DUMP`, a DUMP slot read, a write's reply), the battery report, a SUM step. A DUMP
+    holds the battery report until `END DUMP`, as before.
+  - A SLOT reply (a GET, each DUMP line) reads its slot on one pass and sends the line on a later
+    one. One is in hand at a time; a port's requests wait behind its reply, and a GET on any
+    port. A request that can't be answered yet keeps the old rule: bytes behind it are read and
+    dropped so the 64-byte RX buffer can't overflow (behind a reply in hand with room, they wait
+    a pass in the UART).
+  - The EEPROM writer's step and the drain into the UART run every pass. The drain reaches
+    Serial1 through `sm::Uart1` (`include/sm_uart_avr.h`): HardwareSerial's own buffers, the same
+    bytes and counts, without a virtual call per byte.
 
-  Boot reads the 144 double-tap and long-press records once, in `setup()` (8.3 ms for the 72 double
-  taps; the long-press bank adds about as much).
+  What that changes on the wire (`tools/shadowmap/test_transcripts.py` checks it against
+  `0a8b73f`): a press in the pass a request arrives goes out first, so its PRESS event is sent
+  where `0a8b73f` dropped it for want of room, and a SET in that pass gives the press the old key
+  (as if the SET had come a pass later); a READY in the first pass after a boot names that pass's
+  controllers. GET takes up to two passes longer; SUM stays under 0.5 s.
+- **Loop time.** Worst passes on the emulated ATmega2560 at 16 MHz (`test_avr_timing_*`; Timer1,
+  interrupts off, Serial1 idle so each drain moves 64 bytes, 15-character keys and defaults, an
+  11-character prefix, a 7-character suffix, stale records, HELLO 20, EVENTS on):
 
-  A test fails if any of these reach 1 ms. Motor updates run every 25 ms. Nothing in the mapping
-  waits:
+  | Class | Target | Worst | Where |
+  | --- | --- | --- | --- |
+  | T1: one heavy unit | 750 us | 642.5 us | a press with its PRESS line while DEFAULTS writes |
+  | T2: a press as a write finishes, or two presses | 900 us | 760.5 us | a deferred press and a long press |
+  | T3: three or four presses (report only) | under 1 ms | 987.5 us | four presses, one deferred |
+
+  Some T1 passes: a press with its PRESS line 567.5 us (EVENTS off 287.5 us), a request arriving as
+  a press fires 620.5 us, HELLO 20 575 us, BAT 546.5 us, a GET's passes 444.5 us, a DUMP's 444 us,
+  SUM 372 us, SET 489.5 us, the battery report 474 us, 63 bytes on both ports 369 us. Before this
+  rule and the speedups that came with it (`0a8b73f`), 61 of these figures reached 1 ms (a GET
+  1.37 ms, a press 1.07 ms, DEFAULTS' last step 10.7 ms, a GET and a long press in one pass
+  2.84 ms). A test fails if a T1 pass is over 750 us, a T2 pass over 900 us, or anything reaches
+  1 ms. Four presses with an EEPROM job finishing can't happen: a deferred press always skips the
+  writer's next step. Motor updates run every 25 ms. Nothing in the mapping waits:
   - A lookup that would have to wait on an EEPROM write is deferred to the next pass. That
     press is dropped if its controller has gone, or if it's more than 250 ms old.
-  - A request that can't be answered yet stays queued, and bytes arriving meanwhile are read
-    and dropped so Serial1's 64-byte RX buffer can't overflow.
+  - A request that can't be answered yet stays queued (see above).
   - USB replies wait until the debug output is nearly empty, so `printOutput()` never writes
     more than about 128 bytes for them.
+
+  Boot reads the 144 double-tap and long-press records once, in `setup()`: 10 ms with the
+  firmware's defaults (21.6 ms at `0a8b73f`).
 - **Round trips on SHADOW's side,** from the simulator, 9600 baud: GET about 75 ms, SET about
-  120 ms (250 ms for the first write, which formats the EEPROM), SUM about 330 ms, DUMP about
-  7.9 s for 144 slots (4.2 s for 72); expect about 12 s for 216. The inbound leg adds about 1 ms per character.
+  120 ms (250 ms for the first write, which formats the EEPROM), SUM about 0.48 s, DUMP about
+  11.7 s for 216 slots. The inbound leg adds about 1 ms per character.
 - **Round trips on the droid** (2026-09-24, WCB 1 S2, from DroidNet's listener API on the Pi to the reply in
   its serial history): HELLO 91-129 ms, GET 107-136 ms, SUM about 140 ms, SET 205 ms (303 ms for the first
   write), REVERT 159-175 ms, DUMP 4.41 s to `END DUMP 72`. Those were v1, before double taps; expect a
-  DUMP of about 12.5 s (v3, 216 slots) and a SUM of about 0.3 s now (not yet measured on the droid).
+  DUMP of about 12.5 s (v3, 216 slots) and a SUM of about 0.5 s now (not yet measured on the droid).
 - **Memory:**
-  - Static SRAM is 2970 bytes, down from 3801 before the runtime mapping (the tables,
-    descriptions and switch strings are gone). Double taps added 89 of them.
-  - Flash is 53,156 of 253,952 bytes.
+  - Static SRAM is 2978 bytes (`0a8b73f`: 2968 with a version string of the same length). The SLOT
+    reply in hand takes 20 and the pass ledger 3; the hex digit table (17) went to flash.
+  - Flash is 56,972 of 253,952 bytes (`0a8b73f`: 53,178): the CRC byte planes (1.5 KB) and the
+    assembly, the head CRC states, the Serial1 adapter.
 
 ## Testing
 
 ```bash
-pio test -e native                        # host: 137 tests (+2 AVR-only, skipped)
-pio test -e simavr --without-uploading    # emulated ATmega2560: all 139
+pio test -e native                        # host: 174 tests (+33 AVR-only, skipped)
+pio test -e simavr --without-uploading    # emulated ATmega2560: 206 (+1 host-only, skipped)
 python3 -m unittest tools/shadowmap/test_shadowmap.py   # reference client vs. the firmware logic
+python3 -m unittest tools/shadowmap/test_transcripts.py # what SHADOW sends, against 0a8b73f
 ```
 
 - **What's covered:**
@@ -486,6 +522,14 @@ python3 -m unittest tools/shadowmap/test_shadowmap.py   # reference client vs. t
   - the protocol: every verb and error, CRC handling, routing, DUMP/SUM consistency, flow control,
     button commands always fitting during a DUMP
   - runtime timing, and the real EEPROM under simavr
+  - every mapping pass's worst time (`test_avr_timing_*`: requests, writes, DUMP and SUM, every kind
+    of press, RX passes, requests meeting presses, two to four presses in a pass)
+  - the faster code against the code it replaced: CRC16 for every (state, byte), CRC32, the AVR
+    assembly for every length, every slot's parts and text, the parsers, record validity, the
+    defaults' RAM bits, the line builder, the TX copies at every ring position, `sm::Uart1`
+    against HardwareSerial (`test_equiv_*`, `test_avr_crc_asm`, `test_avr_uart1`)
+  - the per-pass rule (`test_scheduler`), and transcripts of eight scripted sessions against
+    goldens from `0a8b73f`, at once and at 2 bytes a pass (`tools/shadowmap/test_transcripts.py`)
   - double taps (`test_double_tap`): exclusive firing, the window, holds, taps after a double
     tap, both controllers, drops and faults, events
   - long presses (`test_long_press`, 24 cases): the threshold, releases before and after it, with
