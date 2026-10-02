@@ -95,6 +95,9 @@ class MapStore {
     Result beginSuffix(const char *suffix);
 
     bool busy() const { return phase_ != Phase::Idle || pendingSlot_ != kNoSlot; }
+    // The next step() verifies the job's record and, if it's good, finishes the job (the heavy
+    // step: a slot's RAM bit reload, or a header's apply and, for DEFAULTS, every bit's reload).
+    bool finishDue() const { return phase_ == Phase::Verify; }
     void step();
     Completion takeCompletion();
 

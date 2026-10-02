@@ -3,14 +3,20 @@
 //
 //   pio test -e simavr -f "test_avr_timing*" --without-uploading -v
 //
-// Every figure is printed as a "TIMING" line:  TIMING <us> <A|-> <what>
-// ("A": test_avr measures it too, though with lighter data). The last test of each suite fails
-// when anything reaches 1 ms, the limit test_avr enforces. To only print the figures, build with
-//   PLATFORMIO_BUILD_FLAGS=-DSM_TIMING_REPORT_ONLY
+// Every figure is printed as a "TIMING" line:  TIMING <us> <class> <what>
+//   T1  a pass with one heavy unit (a request taken in, a line sent, a slot read, one press fired)
+//       plus the work every pass does (the EEPROM writer's step and the drain into the UART)
+//   T2  one press fired with the EEPROM writer finishing a job in the same pass, or two presses
+//   T3  three or four presses in one pass (report only)
+//   -   a building block or an older figure kept for comparison, not a whole pass
+// The last test of each suite fails when any figure but a building block reaches 1 ms (the limit
+// test_avr enforces), and, built with -DSM_TIMING_TARGET, when a T1 figure is over 750 us or a T2
+// figure over 900 us. To only print the figures, build with -DSM_TIMING_REPORT_ONLY.
 //
 // How it times: Timer1 free-running at 2 MHz (prescaler 8, 0.5 us a tick), interrupts off while
 // timing, so a figure is the code's own cycles. A real pass also pays for whatever interrupts
-// land in it (the millis() tick and the UART interrupts: a few us per ms).
+// land in it (the millis() tick and the UART interrupts: a few us per ms). Serial (Unity's output)
+// is flushed before each measurement.
 //
 // Worst-case data: the firmware's defaults table holds 35 entries (src/default_mappings.cpp);
 // kWorstDefaults has 38, with the two 15-character defaults the measurements read at its end, so
@@ -35,7 +41,11 @@ namespace smt {
 using namespace sm;
 
 constexpr uint16_t kBudgetUs = 1000;  // test_avr's limit
-constexpr uint16_t kAimUs = 750;      // the margin wanted under it
+constexpr uint16_t kT1Us = 750;       // the target for a pass with one heavy unit
+constexpr uint16_t kT2Us = 900;       // ... with a press and a finishing EEPROM job, or two presses
+
+// Figure classes (see the top of this file).
+enum : uint8_t { kPart = 0, kT1 = 1, kT2 = 2, kT3 = 3 };
 
 // --- Slots and values that make the longest lines -------------------------------------------
 
@@ -102,10 +112,9 @@ struct Worst {
 struct Entry {
     PGM_P what;
     uint16_t ticks;
-    bool inTestAvr;
-    uint8_t line;
+    uint8_t cls;
 };
-constexpr uint8_t kMaxEntries = 72;
+constexpr uint8_t kMaxEntries = 80;
 static Entry gEntries[kMaxEntries];
 static uint8_t gEntryCount = 0;
 
@@ -118,16 +127,21 @@ inline void say(PGM_P fmt, ...) {
     TEST_MESSAGE(msg);
 }
 
-// Prints and keeps one worst case. `what` is a flash string (PSTR); `line` is the length of the
-// longest line it sent, without framing (0: none or not relevant).
-inline void record(PGM_P what, uint16_t ticks, bool inTestAvr = false, uint8_t line = 0) {
+inline char classMark(uint8_t cls) { return cls == kPart ? '-' : static_cast<char>('0' + cls); }
+
+// Prints and keeps one worst case. `what` is a flash string (PSTR); `cls` its class (kT1, kT2,
+// kT3, or kPart for a building block); `line` the length of the longest line it sent, without
+// framing (0: none or not relevant).
+inline void record(PGM_P what, uint16_t ticks, uint8_t cls = kT1, uint8_t line = 0) {
     if (line != 0)
-        say(PSTR("TIMING %4u.%u us %c %S [%u-char line]"), ticks / 2, (ticks & 1) ? 5 : 0, inTestAvr ? 'A' : '-',
-            what, line);
+        say(PSTR("TIMING %4u.%u us T%c %S [%u-char line]"), ticks / 2, (ticks & 1) ? 5 : 0, classMark(cls), what,
+            line);
     else
-        say(PSTR("TIMING %4u.%u us %c %S"), ticks / 2, (ticks & 1) ? 5 : 0, inTestAvr ? 'A' : '-', what);
+        say(PSTR("TIMING %4u.%u us T%c %S"), ticks / 2, (ticks & 1) ? 5 : 0, classMark(cls), what);
     if (gEntryCount < kMaxEntries)
-        gEntries[gEntryCount++] = {what, ticks, inTestAvr, line};
+        gEntries[gEntryCount++] = {what, ticks, cls};
+    else
+        TEST_FAIL_MESSAGE("raise kMaxEntries");
 }
 
 // A building block, not a pass: printed for the breakdowns, left out of the budget check.
@@ -135,22 +149,33 @@ inline void part(PGM_P what, uint16_t ticks) {
     say(PSTR("PART   %4u.%u us   %S"), ticks / 2, (ticks & 1) ? 5 : 0, what);
 }
 
-// The last test of a suite: everything kept with record() must be under 1 ms.
+// The last test of a suite: no pass may reach 1 ms; with SM_TIMING_TARGET, T1 passes must be
+// within 750 us and T2 passes within 900 us.
 inline void checkBudget() {
     uint8_t over = 0;
+    uint8_t missed = 0;
     for (uint8_t i = 0; i < gEntryCount; ++i) {
         const Entry &e = gEntries[i];
+        if (e.cls == kPart)
+            continue;
         if (e.ticks >= 2u * kBudgetUs) {
             ++over;
-            say(PSTR("OVER 1 ms:     %4u.%u us %S"), e.ticks / 2, (e.ticks & 1) ? 5 : 0, e.what);
-        } else if (e.ticks > 2u * kAimUs) {
-            say(PSTR("over 750 us:   %4u.%u us %S"), e.ticks / 2, (e.ticks & 1) ? 5 : 0, e.what);
+            say(PSTR("OVER 1 ms:     %4u.%u us T%c %S"), e.ticks / 2, (e.ticks & 1) ? 5 : 0, classMark(e.cls), e.what);
+        } else if ((e.cls == kT1 && e.ticks > 2u * kT1Us) || (e.cls == kT2 && e.ticks > 2u * kT2Us)) {
+            ++missed;
+            say(PSTR("over target:   %4u.%u us T%c %S"), e.ticks / 2, (e.ticks & 1) ? 5 : 0, classMark(e.cls),
+                e.what);
         }
     }
-    say(PSTR("%u figures, %u at or over 1 ms"), gEntryCount, over);
+    say(PSTR("%u figures, %u at or over 1 ms, %u over their target (T1 750 us, T2 900 us)"), gEntryCount, over,
+        missed);
 #ifndef SM_TIMING_REPORT_ONLY
     if (over != 0)
         TEST_FAIL_MESSAGE("a mapping pass reaches 1 ms (OVER lines)");
+#ifdef SM_TIMING_TARGET
+    if (missed != 0)
+        TEST_FAIL_MESSAGE("a mapping pass misses its target (over target lines)");
+#endif
 #endif
 }
 
@@ -248,6 +273,8 @@ class PacedEeprom final : public EepromIo {
         if (busy_ != 0)
             --busy_;
     }
+    // Busy for the next `passes` ticks, as if a write had just started.
+    void holdBusy(uint8_t passes) { busy_ = passes; }
     uint8_t busyPasses = 0;
     bool corrupt = false;
 
