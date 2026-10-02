@@ -15,7 +15,7 @@ class LineReader {
     // refused (false) until consume() is called, so a line waiting to be handled is never
     // overwritten.
     // Inline: Runtime::pump calls it for every byte it reads.
-    inline bool feed(char c);
+    __attribute__((always_inline)) inline bool feed(char c);
     bool ready() const { return state_ == State::Ready; }
     const char *line() const { return buf_; }
     uint8_t length() const { return len_; }

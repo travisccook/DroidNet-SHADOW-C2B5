@@ -44,6 +44,25 @@ static void test_button_presses() {
            static_cast<uint8_t>(null.longest - 8));
     runtime.buttons(t0 + 700, kNone, kNone, &gFired);
 
+    // The single press's building blocks.
+    {
+        bool from = false;
+        part(PSTR("resolveSlot D CIRCLE RIGHT (CIRCLE on the foot)"),
+             ticksOf([&] { gSink8 = resolveSlot(Ctrl::D, kDomeRight, kFootCircle, &from); }));
+        char key[kKeyBuf];
+        Source src = Source::Default;
+        gSlotIn = kWideSingle;
+        part(PSTR("keyForSlot D CIRCLE RIGHT (stale record, 15-char default)"),
+             ticksOf([&] { store.keyForSlot(gSlotIn, key, &src); }));
+        drainAll();
+        part(PSTR("pushCommand 11 + 15 + 7"),
+             ticksOf([&] { pushCommand(tx, store.prefix(), key, store.suffix()); }));
+        drainAll();
+        part(PSTR("notifyPress D CIRCLE RIGHT from=F (65-char PRESS line)"),
+             ticksOf([&] { protocol.notifyPress(gSlotIn, key, src, true); }));
+        drainAll();
+    }
+
     // A single press fires at once: D CIRCLE RIGHT from=F, stale record, 15-char default.
     null.longest = 0;
     t = ticksOf([&] { gAny = runtime.buttons(20000, kFootCircle, kDomeRight, &gFired); });

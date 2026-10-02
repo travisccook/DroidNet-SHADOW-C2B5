@@ -542,9 +542,10 @@ void Protocol::notifyPress(uint8_t slot, const char *key, Source src, bool modFr
         return;
     Out out;
     out.head(Out::Head::Press, slot).c(' ').key(key).c(' ').p(sourceToken(src));
+    const SlotParts parts = splitSlot(slot);  // slot < kSlotCount: buttons() only fires slots
     if (modFromOther)
-        out.p(PSTR(" from=")).c(slotCtrl(slot) == Ctrl::F ? 'D' : 'F');
-    const Reserved why = slotReserved(slot);
+        out.p(PSTR(" from=")).c(parts.ctrl == static_cast<uint8_t>(Ctrl::F) ? 'D' : 'F');
+    const Reserved why = slot < kSlotCount ? slotReserved(parts) : Reserved::No;
     if (why != Reserved::No)
         out.p(PSTR(" res=")).p(reservedToken(why));
     emit(out, *eventPort_);

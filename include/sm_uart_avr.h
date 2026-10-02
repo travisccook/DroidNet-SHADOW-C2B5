@@ -29,10 +29,10 @@ namespace sm {
 
 class Uart1 {
   public:
-    int available() const {
+    __attribute__((always_inline)) int available() const {
         return static_cast<uint8_t>(A::rxHead() - A::rxTail()) & static_cast<uint8_t>(SERIAL_RX_BUFFER_SIZE - 1);
     }
-    int read() {
+    __attribute__((always_inline)) int read() {
         const rx_buffer_index_t tail = A::rxTail();
         if (A::rxHead() == tail)
             return -1;

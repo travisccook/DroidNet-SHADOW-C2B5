@@ -6,6 +6,7 @@
 #include <unity.h>
 
 #include <ShadowMap.h>
+#include <new>
 #include <default_mappings.h>
 #include <sm_fakes.h>
 #include <sm_test_main.h>
@@ -337,6 +338,25 @@ static void test_parts() {
                                            static_cast<uint8_t>(slotBtn(s)) + static_cast<uint8_t>(slotTap(s)));
          }));
     part(PSTR("formatSlot F CIRCLE RIGHTL"), ticksOf([&] { gSink8 = formatSlot(text, sizeof(text), gSlotIn); }));
+    {
+        // The pieces of a 65-character PRESS line.
+        static Out o;
+        part(PSTR("Out: construct"), ticksOf([&] { new (&o) Out(); }));
+        part(PSTR("Out: head(Press, F CIRCLE RIGHTL)"), ticksOf([&] { o.head(Out::Head::Press, gSlotIn); }));
+        part(PSTR("Out: c(' ').key(15 chars).c(' ')"), ticksOf([&] { o.c(' ').key(kKey15).c(' '); }));
+        part(PSTR("Out: p(\"default\")"), ticksOf([&] { o.p(PSTR("default")); }));
+        part(PSTR("Out: p(\" from=\").c('D')"), ticksOf([&] { o.p(PSTR(" from=")).c('D'); }));
+        part(PSTR("Out: slotReserved + slotCtrl"),
+             ticksOf([&] { gSink8 = static_cast<uint8_t>(static_cast<uint8_t>(slotReserved(gSlotIn)) + static_cast<uint8_t>(slotCtrl(gSlotIn))); }));
+        part(PSTR("Out: finish() (CRC over 37 bytes, \" *\", 8 hex digits)"), ticksOf([&] { gSink8 = o.finish(); }));
+        drainAll();
+        part(PSTR("WcbPort::send of the 66-char line"), ticksOf([&] { port.send(o.str(), o.len()); }));
+        drainAll();
+        part(PSTR("WcbPort::canSend"), ticksOf([&] { gSink8 = port.canSend(Protocol::kMaxLine); }));
+        static Out q;
+        part(PSTR("Out: hex32"), ticksOf([&] { q.hex32(0x12345678UL); }));
+        part(PSTR("Out: u(4294967295)"), ticksOf([&] { q.u(4294967295UL); }));
+    }
 
     drainAll();
     memset(text, 'a', 78);

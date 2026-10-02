@@ -35,25 +35,39 @@ struct SlotParts {
     uint8_t mod;
     uint8_t btn;
 };
-inline SlotParts splitSlot(uint8_t slot) {
+__attribute__((always_inline)) inline SlotParts splitSlot(uint8_t slot) {
     SlotParts p;
     uint8_t s = slot;
-    uint8_t t = 0;
-    while (s >= kSingleSlotCount) {
+    p.tap = 0;
+    if (s >= 2 * kSingleSlotCount) {
+        if (s >= 3 * kSingleSlotCount) {
+            s = static_cast<uint8_t>(s - 3 * kSingleSlotCount);
+            p.tap = 3;
+        } else {
+            s = static_cast<uint8_t>(s - 2 * kSingleSlotCount);
+            p.tap = 2;
+        }
+    } else if (s >= kSingleSlotCount) {
         s = static_cast<uint8_t>(s - kSingleSlotCount);
-        ++t;
+        p.tap = 1;
     }
-    p.tap = t;
     p.bank = s;
     p.ctrl = 0;
     if (s >= kSlotsPerCtrl) {
         s = static_cast<uint8_t>(s - kSlotsPerCtrl);
         p.ctrl = 1;
     }
-    uint8_t m = 0;
-    while (s >= kBtnCount) {
+    uint8_t m = 0;  // s is 0-35 here: three, two and one buttons' worth of modifiers
+    if (s >= 3 * kBtnCount) {
+        s = static_cast<uint8_t>(s - 3 * kBtnCount);
+        m = 3;
+    }
+    if (s >= 2 * kBtnCount) {
+        s = static_cast<uint8_t>(s - 2 * kBtnCount);
+        m = static_cast<uint8_t>(m + 2);
+    } else if (s >= kBtnCount) {
         s = static_cast<uint8_t>(s - kBtnCount);
-        ++m;
+        m = static_cast<uint8_t>(m + 1);
     }
     p.mod = m;
     p.btn = s;
@@ -79,6 +93,7 @@ enum class Reserved : uint8_t {
 };
 
 Reserved slotReserved(uint8_t slot);
+Reserved slotReserved(const SlotParts &p);  // the same, for a slot (< kSlotCount) already split
 
 // Protocol tokens: controller "F"/"D", modifier "NONE".."CROSS", button "UP".."PS". A double
 // tap is the button with "2" after it ("UP2"), a long press the button with "L" ("UPL");
@@ -97,6 +112,8 @@ constexpr uint8_t kSlotTextBuf = 16;
 // (`slot` must be a slot; returns the length). For lines built in place (Out::slot).
 uint8_t slotTextLen(uint8_t slot);
 uint8_t writeSlotText(char *dst, uint8_t slot);
+uint8_t slotTextLen(const SlotParts &p);                 // for a slot already split
+uint8_t writeSlotText(char *dst, const SlotParts &p);
 // The length of a modifier's token ("NONE" 4 ... "CIRCLE" 6).
 uint8_t modTextLen(uint8_t mod);
 
