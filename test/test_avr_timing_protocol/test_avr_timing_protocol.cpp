@@ -1,7 +1,8 @@
 // Worst-case time of every @SM request, every pass of each write, DUMP and SUM, and every step
 // of the EEPROM writer, with the data that makes each one longest. AVR only (simavr); see
 // test/support/sm_avr_timing.h for the method. The PART lines are building blocks for the
-// breakdowns, not passes.
+// breakdowns, not passes. One MapStore and one Protocol, as in the firmware: with -flto a second
+// instance changes how the library is compiled (keyForSlot loses its specialized clone).
 #include <unity.h>
 
 #include <ShadowMap.h>
@@ -290,7 +291,6 @@ static void test_parts() {
     worstState();
     char key[kKeyBuf];
     Source src = Source::Default;
-    uint8_t rec[MapStore::kSlotSize];
     char text[96];
 
     gSlotIn = kWide;
@@ -309,20 +309,23 @@ static void test_parts() {
              for (uint8_t i = 0; i < MapStore::kSlotSize; ++i)
                  gSink8 = io.read(static_cast<uint16_t>(64 + i));
          }));
-    for (uint8_t i = 0; i < MapStore::kSlotSize; ++i)
-        rec[i] = io.read(static_cast<uint16_t>(64 + i));
+    uint8_t bytes[30];
+    for (uint8_t i = 0; i < sizeof(bytes); ++i)
+        bytes[i] = io.read(static_cast<uint16_t>(64 + i));
     part(PSTR("CRC16 of one slot record (20 bytes, bitwise)"), ticksOf([&] {
              uint16_t crc = kCrc16Init;
              for (uint8_t i = 0; i < 20; ++i)
-                 crc = crc16Update(crc, rec[i % MapStore::kSlotSize]);
+                 crc = crc16Update(crc, bytes[i]);
              gSink16 = crc;
          }));
     part(PSTR("CRC16 of a header (30 bytes, bitwise)"), ticksOf([&] {
              uint16_t crc = kCrc16Init;
              for (uint8_t i = 0; i < 30; ++i)
-                 crc = crc16Update(crc, rec[i % MapStore::kSlotSize]);
+                 crc = crc16Update(crc, bytes[i]);
              gSink16 = crc;
          }));
+    strcpy(key, kKey15);
+    part(PSTR("isValidKey, 15 chars"), ticksOf([&] { gSink8 = isValidKey(key); }));
     memset(text, 'a', sizeof(text));
     part(PSTR("CRC32 of 68 bytes (a SLOT line before \" *\")"),
          ticksOf([&] { gSink32 = crc32(reinterpret_cast<const uint8_t *>(text), 68); }));
@@ -376,6 +379,7 @@ static void test_parts() {
 static void test_every_pass_is_under_1_ms() { checkBudget(); }
 
 #else
+
 
 static void test_requests() { TEST_IGNORE_MESSAGE("AVR only (pio test -e simavr)"); }
 static void test_writes() { TEST_IGNORE_MESSAGE("AVR only (pio test -e simavr)"); }
