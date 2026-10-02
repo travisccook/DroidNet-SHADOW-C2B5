@@ -245,6 +245,25 @@ static void test_announce_and_battery() {
     record(PSTR("service(): pass with the battery report (NullUart)"), t, false,
            static_cast<uint8_t>(null.last - 8));
     drainAll();
+
+    // The same two passes draining into the real Serial1 (UART idle).
+    Serial1.begin(9600);
+    runtime.startAnnounce(0, 42);
+    SerialPoke::dropTx1();
+    t = ticksOf([&] { runtime.service(Runtime::kFirstAnnounceMaxMs, Serial1); });
+    record(PSTR("service(): pass with the announce, drain into Serial1"), t);
+    SerialPoke::dropTx1();
+    drainAll();
+    runtime.startBattery(port, base);
+    runtime.batteries(base + 4000, false, 0, false, 0);
+    runtime.batteries(base + 4001, true, 1, true, 1);
+    runtime.batteries(base + 6002, true, 1, true, 1);
+    SerialPoke::dropTx1();
+    t = ticksOf([&] { runtime.service(base + 6002, Serial1); });
+    TEST_ASSERT_TRUE(tx.used() > 0);
+    record(PSTR("service(): pass with the battery report, drain into Serial1"), t);
+    SerialPoke::dropTx1();
+    drainAll();
 }
 
 static void test_line_input() {
@@ -408,7 +427,7 @@ static void test_loop_passes() {
         w.add(gLast);
     }
     TEST_ASSERT_FALSE(protocol.opInProgress());
-    recordPass(PSTR("loop pass: DUMP (worst slot) + battery and announce due + drain"), w, true);
+    recordPass(PSTR("loop pass: DUMP (worst slot) + battery and announce due + drain"), w);
     for (uint8_t i = 0; i < 10; ++i)
         loopPass(now + 10 + i, kNone, kNone, 1, 1);
 
@@ -433,7 +452,7 @@ static void test_loop_passes() {
         TEST_ASSERT_FALSE(protocol.opInProgress());
     }
     io.busyPasses = 0;
-    recordPass(PSTR("loop pass: SET in flight (paced EEPROM) + long press, swept"), sweep, true);
+    recordPass(PSTR("loop pass: SET in flight (paced EEPROM) + long press, swept"), sweep);
 
     // DEFAULTS in flight, with presses.
     worstState();

@@ -12,9 +12,11 @@
 // timing, so a figure is the code's own cycles. A real pass also pays for whatever interrupts
 // land in it (the millis() tick and the UART interrupts: a few us per ms).
 //
-// Worst-case data: the firmware's defaults table holds 36 entries (src/default_mappings.cpp);
+// Worst-case data: the firmware's defaults table holds 35 entries (src/default_mappings.cpp);
 // kWorstDefaults has 38, with the two 15-character defaults the measurements read at its end, so
 // every default lookup scans the whole table, as an unmapped slot does on the droid.
+// test_avr_timing_protocol checks the firmware's table stays at least 2 shorter.
+// test_avr_timing_shipped runs the protocol with the firmware's own table.
 #pragma once
 
 #if defined(__AVR__)
