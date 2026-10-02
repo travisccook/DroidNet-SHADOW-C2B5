@@ -308,6 +308,30 @@ static void test_loop_passes() {
     settle(now, &get);
     recordPass(PSTR("loop pass: worst GET + long press fires + drain into Serial1"), get);
 
+    // The same GET with only its CR still to come in the pass the long press comes due.
+    worstState();
+    loopPass(t0, kFootRight, kDomeCircle);
+    for (uint32_t ms = 100; ms < Runtime::kLongPressMs; ms += 100) {
+        if (ms == 300) {
+            crcLine(PSTR("@SM GET F CIRCLE RIGHTL"));
+            SerialPoke::inject(Serial1, gLine);  // all but its CR
+        }
+        loopPass(t0 + ms, kFootRight, kDomeCircle);
+    }
+    drainAll();
+    SerialPoke::inject(Serial1, "\r");
+    get = WorstPass();
+    fired = false;
+    now = t0 + Runtime::kLongPressMs;
+    for (uint8_t i = 0; i < 6; ++i, now += 2) {
+        loopPass(now, kFootRight, kDomeCircle);
+        fired = fired || gAny;
+        get.add(gLast);
+    }
+    TEST_ASSERT_TRUE(fired);
+    settle(now, &get);
+    recordPass(PSTR("loop pass: the worst GET's CR arrives as a long press fires"), get);
+
     // A SUM in progress (no output until its end) with a single press, and its PRESS line, on
     // every other pass; run twice so every slot's pass meets a press.
     WorstPass sum;
