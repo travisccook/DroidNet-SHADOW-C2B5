@@ -8,11 +8,13 @@
 #include <new>
 
 #include <sm_avr_timing.h>
+#include <sm_uart_avr.h>
 
 namespace smt {
 
-// The firmware's WCB UART as loop() reaches it.
-#define SMT_WCB_UART Serial1
+// The firmware's WCB UART as loop() reaches it (main.cpp's wcbUart).
+sm::Uart1 gUart1;
+#define SMT_WCB_UART gUart1
 
 PacedEeprom io;
 MapStore store(io, kWorstDefaults, kWorstDefaultCount);
