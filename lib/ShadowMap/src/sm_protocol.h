@@ -10,6 +10,7 @@
 #include <stdint.h>
 
 #include "sm_battery.h"
+#include "sm_out.h"
 #include "sm_store.h"
 #include "sm_tx.h"
 
@@ -53,11 +54,12 @@ class WcbPort final : public ReplyPort {
     TxQueue &tx_;
     uint8_t route_ = 0;
     char routeText_[10] = {};  // longest is ";W20,;S0"
+    uint8_t routeLen_ = 0;
 };
 
 class Protocol {
   public:
-    static constexpr uint8_t kMaxLine = 80;  // longest reply, before port framing
+    static constexpr uint8_t kMaxLine = kLineMax;  // longest reply, before port framing (80)
 
     Protocol(MapStore &store, const char *fwVersion) : store_(store), fw_(fwVersion) {}
 
@@ -89,7 +91,6 @@ class Protocol {
     enum class Op : uint8_t { None, Set, Revert, Defaults, Prefix, Suffix, Dump, Sum };
 
     bool sendSlotLine(uint8_t slot, ReplyPort &port);
-    uint8_t formatSlotBody(char *dst, uint8_t cap, uint8_t slot, const char *key, Source src) const;
     void servicePads();
     void sendOpReply(bool ok);
     void startOp(Op op, ReplyPort &port, MapStore::Result r, const char *verb, uint8_t slot);

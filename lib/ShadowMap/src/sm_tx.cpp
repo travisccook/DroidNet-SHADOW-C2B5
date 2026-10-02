@@ -11,18 +11,50 @@ void TxQueue::put(char c) {
     ++used_;
 }
 
-bool TxQueue::pushLine(const char *const *parts, uint8_t count) {
-    size_t total = 1;  // '\r'
+void TxQueue::putBytes(const char *s, uint8_t n) {
+    const uint8_t room = static_cast<uint8_t>(kCapacity - tail_);  // up to the end of buf_
+    if (n < room) {
+        memcpy(buf_ + tail_, s, n);
+        tail_ = static_cast<uint8_t>(tail_ + n);
+    } else {
+        memcpy(buf_ + tail_, s, room);
+        memcpy(buf_, s + room, static_cast<uint8_t>(n - room));  // the rest wraps to the start
+        tail_ = static_cast<uint8_t>(n - room);
+    }
+    used_ = static_cast<uint8_t>(used_ + n);
+}
+
+bool TxQueue::pushParts(const char *const *parts, const uint8_t *lens, uint8_t count) {
+    uint16_t total = 1;  // '\r'
     for (uint8_t i = 0; i < count; ++i)
-        total += strlen(parts[i]);
+        total = static_cast<uint16_t>(total + lens[i]);
     if (total > freeSpace())
         return false;
     for (uint8_t i = 0; i < count; ++i) {
-        for (const char *p = parts[i]; *p != '\0'; ++p)
-            put(*p);
+        if (lens[i] != 0)
+            putBytes(parts[i], lens[i]);
     }
     put('\r');
     return true;
+}
+
+bool TxQueue::pushLine(const char *const *parts, uint8_t count) {
+    if (count > kMaxParts)
+        return false;
+    uint8_t lens[kMaxParts];
+    for (uint8_t i = 0; i < count; ++i) {
+        const size_t n = strlen(parts[i]);
+        if (n >= kCapacity)
+            return false;  // can't fit, whatever else is queued
+        lens[i] = static_cast<uint8_t>(n);
+    }
+    return pushParts(parts, lens, count);
+}
+
+bool TxQueue::pushLine2(const char *a, uint8_t na, const char *b, uint8_t nb) {
+    const char *parts[] = {a, b};
+    const uint8_t lens[] = {na, nb};
+    return pushParts(parts, lens, 2);
 }
 
 bool pushCommand(TxQueue &tx, const char *prefix, const char *key, const char *suffix) {

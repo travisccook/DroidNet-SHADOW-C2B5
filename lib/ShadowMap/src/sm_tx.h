@@ -17,9 +17,14 @@ class TxQueue {
     uint8_t used() const { return used_; }
     uint8_t freeSpace() const { return static_cast<uint8_t>(kCapacity - used_); }
 
-    // Queues the concatenation of `parts` (NUL-terminated strings) followed by '\r', or
-    // nothing if it doesn't all fit.
+    // Queues the concatenation of `parts` (NUL-terminated strings, at most kMaxParts) followed
+    // by '\r', or nothing if it doesn't all fit.
+    static constexpr uint8_t kMaxParts = 4;
     bool pushLine(const char *const *parts, uint8_t count);
+    // The same for two parts of known length (`b` may be nullptr when `nb` is 0).
+    bool pushLine2(const char *a, uint8_t na, const char *b, uint8_t nb);
+    // The same for `count` parts of known length.
+    bool pushParts(const char *const *parts, const uint8_t *lens, uint8_t count);
 
     // Writes as much as `out.availableForWrite()` allows. `Out` is HardwareSerial on the
     // droid and a fake in tests.
@@ -44,6 +49,7 @@ class TxQueue {
 
   private:
     void put(char c);
+    void putBytes(const char *s, uint8_t n);  // n bytes that fit, in at most two copies
 
     char buf_[kCapacity] = {};
     uint8_t head_ = 0;  // next byte to send

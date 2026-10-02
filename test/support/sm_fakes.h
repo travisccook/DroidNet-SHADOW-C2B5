@@ -265,7 +265,10 @@ class WcbSim {
 class CapturePort final : public sm::ReplyPort {
   public:
     bool canSend(uint8_t len) override { return open && len <= sm::Protocol::kMaxLine; }
-    void send(const char *line, uint8_t len) override { log.add(line, len); }
+    void send(const char *line, uint8_t len) override {
+        TEST_ASSERT_EQUAL_UINT_MESSAGE(strlen(line), len, "a reply's length");
+        log.add(line, len);
+    }
     bool requiresCrc() const override { return crcRequired; }
 
     bool open = true;

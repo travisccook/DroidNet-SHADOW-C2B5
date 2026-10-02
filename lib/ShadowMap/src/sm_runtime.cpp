@@ -188,26 +188,30 @@ uint32_t Runtime::between(uint32_t lo, uint32_t hi) {
     return lo + rng_ % (hi - lo + 1);
 }
 
+namespace {
+const char kAnnounceHead[] PROGMEM = "@WDP1 {\"type\":\"Shadow\",\"fw\":\"";
+constexpr uint8_t kAnnounceHeadLen = sizeof(kAnnounceHead) - 1;
+static_assert(kAnnounceHeadLen + 2 + 1 == Runtime::kAnnounceOverhead, "announce overhead");
+}  // namespace
+
 void Runtime::announce(uint32_t nowMs) {
     if (!announcing_ || static_cast<int32_t>(nowMs - nextAnnounce_) < 0)
         return;
     // @WDP1 {"type":"Shadow","fw":"<fw>"}
     char line[64];
-    strcpy_P(line, PSTR("@WDP1 {\"type\":\"Shadow\",\"fw\":\""));
-    const size_t used = strlen(line);
     const size_t fwLen = strlen(announceFw_);
-    if (used + fwLen + 2 >= sizeof(line)) {
+    if (kAnnounceHeadLen + fwLen + 2 >= sizeof(line)) {
         announcing_ = false;  // main.cpp's static_assert rules this out; stop rather than truncate
         return;
     }
-    memcpy(line + used, announceFw_, fwLen);
-    line[used + fwLen] = '"';
-    line[used + fwLen + 1] = '}';
-    line[used + fwLen + 2] = '\0';
-    if (tx_.freeSpace() < strlen(line) + 1 + kCommandHeadroom)
+    const uint8_t len = static_cast<uint8_t>(kAnnounceHeadLen + fwLen + 2);
+    if (tx_.freeSpace() < len + 1 + kCommandHeadroom)
         return;  // busy right now; try again next pass
-    const char *parts[] = {line};
-    tx_.pushLine(parts, 1);
+    memcpy_P(line, kAnnounceHead, kAnnounceHeadLen);
+    memcpy(line + kAnnounceHeadLen, announceFw_, fwLen);
+    line[len - 2] = '"';
+    line[len - 1] = '}';
+    tx_.pushLine2(line, len, nullptr, 0);
     nextAnnounce_ = nowMs + between(kAnnounceMinMs, kAnnounceMaxMs);
 }
 
