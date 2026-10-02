@@ -6,139 +6,15 @@
 #include <unity.h>
 
 #include <ShadowMap.h>
-#include <new>
 #include <sm_fakes.h>
 #include <sm_test_main.h>
 #include <sm_avr_timing.h>
+#include <sm_avr_loop.h>
 
 #if defined(__AVR__)
 
 using namespace sm;
 using namespace smt;
-
-namespace {
-
-PacedEeprom io;
-MapStore store(io, kWorstDefaults, kWorstDefaultCount);
-TxQueue tx;
-WcbPort port(tx);
-Protocol protocol(store, kFw11);
-LineReader wcbLines;
-LineReader usbLines;
-NullUart null;
-
-alignas(Runtime) uint8_t runtimeBytes[sizeof(Runtime)];
-Runtime &runtime = *reinterpret_cast<Runtime *>(runtimeBytes);
-
-// The USB side of loop(): nothing arrives there on the droid, so pump() only asks.
-class IdlePort final : public ReplyPort {
-  public:
-    bool canSend(uint8_t) override { return true; }
-    void send(const char *, uint8_t) override {}
-    bool requiresCrc() const override { return false; }
-};
-IdlePort usbPort;
-
-constexpr PadState kNone = {true, 0};
-// F CIRCLE RIGHT with CIRCLE held on the dome controller ("from=D"); its long press is
-// F CIRCLE RIGHTL (kWide).
-constexpr PadState kFootRight = {true, kHeldRight};
-constexpr PadState kDomeCircle = {true, kHeldCircle};
-// D CIRCLE RIGHT with CIRCLE held on the foot controller ("from=F"): kWideSingle, a single press.
-constexpr PadState kDomeRight = {true, kHeldRight};
-constexpr PadState kFootCircle = {true, kHeldCircle};
-
-void freshRuntime() {
-    new (runtimeBytes) Runtime(store, protocol, tx, kFw11);
-    wcbLines.consume();
-    usbLines.consume();
-}
-
-void drainAll() {
-    while (tx.used() > 0) {
-        tx.drain(null);
-        null.note();
-    }
-}
-
-char gLine[LineReader::kMaxLen + 8];
-const char *crcLine(PGM_P body) {
-    char b[LineReader::kMaxLen + 1];
-    strncpy_P(b, body, sizeof(b) - 1);
-    b[sizeof(b) - 1] = '\0';
-    withCrc(b, gLine, sizeof(gLine));
-    return gLine;
-}
-
-void request(PGM_P body) {
-    drainAll();
-    TEST_ASSERT_TRUE(protocol.handleLine(crcLine(body), port));
-    drainAll();
-}
-
-// The worst state, the reply route at its longest (HELLO 20) and EVENTS on, so every press also
-// sends a PRESS line.
-void worstState() {
-    io.busyPasses = 0;
-    eeWorst();
-    store.begin();
-    freshRuntime();
-    request(PSTR("@SM HELLO 20"));
-    request(PSTR("@SM EVENTS 1"));
-    SerialPoke::clearRx(Serial1);
-}
-
-// One loop() pass of the mapping, in main.cpp's order, with Serial1's TX ring empty first (the
-// UART has sent everything: the most the drain can write in a pass). Each part is timed on its
-// own; the pass is their sum.
-struct PassParts {
-    uint16_t wcbPump, usbPump, buttons, batteries, service;
-    uint16_t total() const {
-        return static_cast<uint16_t>(wcbPump + usbPump + buttons + batteries + service);
-    }
-};
-struct WorstPass {
-    PassParts parts = {};
-    uint16_t passes = 0;
-    void add(const PassParts &p) {
-        if (p.total() > parts.total())
-            parts = p;
-        ++passes;
-    }
-    uint16_t ticks() const { return parts.total(); }
-};
-
-FiredPress gFired;
-bool gAny = false;
-PassParts gLast;
-uint16_t loopPass(uint32_t now, const PadState &foot, const PadState &dome, uint8_t footBatt = 0,
-                  uint8_t domeBatt = 0) {
-    SerialPoke::dropTx1();
-    io.tick();
-    gLast.wcbPump = ticksOf([] { runtime.pump(Serial1, wcbLines, port); });
-    gLast.usbPump = ticksOf([] { runtime.pump(Serial, usbLines, usbPort); });
-    gLast.buttons = ticksOf([&] { gAny = runtime.buttons(now, foot, dome, &gFired); });
-    gLast.batteries =
-        ticksOf([&] { runtime.batteries(now, foot.connected, footBatt, dome.connected, domeBatt); });
-    gLast.service = ticksOf([&] { runtime.service(now, Serial1, true); });
-    return gLast.total();
-}
-
-void recordPass(PGM_P what, const WorstPass &w, bool inTestAvr = false) {
-    record(what, w.ticks(), inTestAvr);
-    const PassParts &p = w.parts;
-    say(PSTR("  parts: WCB pump %u.%u, USB pump %u.%u, buttons %u.%u, batteries %u.%u, service %u.%u us"),
-        p.wcbPump / 2, (p.wcbPump & 1) * 5, p.usbPump / 2, (p.usbPump & 1) * 5, p.buttons / 2, (p.buttons & 1) * 5,
-        p.batteries / 2, (p.batteries & 1) * 5, p.service / 2, (p.service & 1) * 5);
-}
-
-void injectLine(PGM_P body) {
-    crcLine(body);
-    SerialPoke::inject(Serial1, gLine);
-    SerialPoke::inject(Serial1, "\r");
-}
-
-}  // namespace
 
 static void test_button_presses() {
     timerBegin();
@@ -164,7 +40,7 @@ static void test_button_presses() {
     TEST_ASSERT_TRUE(gFired.queued);
     drainAll();
     TEST_ASSERT_EQUAL_UINT8(8 + 66, null.longest);
-    record(PSTR("buttons(): long press fires (command + PRESS F CIRCLE RIGHTL ... from=D)"), t, false,
+    record(PSTR("buttons(): long press fires (command + PRESS F CIRCLE RIGHTL ... from=D)"), t, kT1,
            static_cast<uint8_t>(null.longest - 8));
     runtime.buttons(t0 + 700, kNone, kNone, &gFired);
 
@@ -175,9 +51,18 @@ static void test_button_presses() {
     TEST_ASSERT_EQUAL_UINT8(kWideSingle, gFired.slot);
     TEST_ASSERT_TRUE(gFired.modFromOther);
     drainAll();
-    record(PSTR("buttons(): single press fires (command + PRESS D CIRCLE RIGHT ... from=F)"), t, true,
+    record(PSTR("buttons(): single press fires (command + PRESS D CIRCLE RIGHT ... from=F)"), t, kT1,
            static_cast<uint8_t>(null.longest - 8));
     runtime.buttons(20100, kNone, kNone, &gFired);
+
+    // The same with EVENTS off: the command only.
+    request(PSTR("@SM EVENTS 0"));
+    t = ticksOf([&] { gAny = runtime.buttons(21200, kFootCircle, kDomeRight, &gFired); });
+    TEST_ASSERT_TRUE(gAny);
+    drainAll();
+    record(PSTR("buttons(): single press fires, EVENTS off (command only)"), t);
+    runtime.buttons(21300, kNone, kNone, &gFired);
+    request(PSTR("@SM EVENTS 1"));
 
     // A double tap: F CIRCLE RIGHT2 holds a valid 15-char record.
     eeSlot(doubleOf(slotIndex(Ctrl::F, Mod::CIRCLE, Btn::RIGHT)), kGen, kKey15);
@@ -192,7 +77,7 @@ static void test_button_presses() {
         drainAll();
     }
     TEST_ASSERT_EQUAL_UINT8(doubleOf(slotIndex(Ctrl::F, Mod::CIRCLE, Btn::RIGHT)), gFired.slot);
-    record(PSTR("buttons(): worst pass of a double tap (second press fires F CIRCLE RIGHT2)"), w.ticks, true);
+    record(PSTR("buttons(): worst pass of a double tap (second press fires F CIRCLE RIGHT2)"), w.ticks);
 
     // Two presses in one pass: a press deferred while an EEPROM write was in flight fires with
     // a long press that comes due in the same pass.
@@ -221,7 +106,7 @@ static void test_button_presses() {
     drainAll();
     // Both commands, and the first press's PRESS line (the second's waits for room: dropped).
     TEST_ASSERT_EQUAL_UINT16(3, null.lines - linesBefore);
-    record(PSTR("buttons(): a deferred press and a long press in one pass"), t);
+    record(PSTR("buttons(): a deferred press and a long press in one pass"), t, kT2);
     io.busyPasses = 0;
     for (uint16_t i = 0; i < 200 && store.busy(); ++i)
         store.step();
@@ -238,7 +123,7 @@ static void test_announce_and_battery() {
     t = ticksOf([&] { runtime.service(Runtime::kFirstAnnounceMaxMs, null); });
     null.note();
     TEST_ASSERT_EQUAL_UINT8(42, null.last);
-    record(PSTR("service(): pass with the announce (NullUart)"), t, true, null.last);
+    record(PSTR("service(): pass with the announce (NullUart)"), t, kT1, null.last);
     drainAll();
 
     // The battery report: both CRIT, up= at its longest (7 digits).
@@ -249,15 +134,14 @@ static void test_announce_and_battery() {
     record(PSTR("batteries(): both levels settle"), t);
     t = ticksOf([&] { runtime.service(base + 2001, null); });
     null.note();
-    record(PSTR("service(): pass with the battery report (NullUart)"), t, false,
-           static_cast<uint8_t>(null.last - 8));
+    record(PSTR("service(): pass with the battery report (NullUart)"), t, kT1, static_cast<uint8_t>(null.last - 8));
     drainAll();
 
     // The same two passes draining into the real Serial1 (UART idle).
     Serial1.begin(9600);
     runtime.startAnnounce(0, 42);
     SerialPoke::dropTx1();
-    t = ticksOf([&] { runtime.service(Runtime::kFirstAnnounceMaxMs, Serial1); });
+    t = ticksOf([&] { runtime.service(Runtime::kFirstAnnounceMaxMs, SMT_WCB_UART); });
     record(PSTR("service(): pass with the announce, drain into Serial1"), t);
     SerialPoke::dropTx1();
     drainAll();
@@ -266,7 +150,7 @@ static void test_announce_and_battery() {
     runtime.batteries(base + 4001, true, 1, true, 1);
     runtime.batteries(base + 6002, true, 1, true, 1);
     SerialPoke::dropTx1();
-    t = ticksOf([&] { runtime.service(base + 6002, Serial1); });
+    t = ticksOf([&] { runtime.service(base + 6002, SMT_WCB_UART); });
     TEST_ASSERT_TRUE(tx.used() > 0);
     record(PSTR("service(): pass with the battery report, drain into Serial1"), t);
     SerialPoke::dropTx1();
@@ -291,7 +175,7 @@ static void test_line_input() {
             ready = reader.feed(body[i]);
     });
     TEST_ASSERT_TRUE(ready);
-    record(PSTR("LineReader: a 72-char line and its CR (73 feeds)"), t);
+    record(PSTR("LineReader: a 72-char line and its CR (73 feeds)"), t, kPart);
 
     // pump() from the real Serial1: 63 bytes (all its RX buffer holds) of other traffic.
     char junk[64];
@@ -299,11 +183,11 @@ static void test_line_input() {
     junk[62] = '\r';
     junk[63] = '\0';
     SerialPoke::inject(Serial1, junk);
-    t = ticksOf([] { runtime.pump(Serial1, wcbLines, port); });
+    t = ticksOf([] { runtime.pump(SMT_WCB_UART, wcbLines, port); });
     TEST_ASSERT_EQUAL_INT(0, Serial1.available());
     record(PSTR("pump(): 63 bytes of other traffic"), t);
 
-    // 63 bytes: the end of other traffic, then the worst GET, handled in the same pass.
+    // 63 bytes: the end of other traffic, then the worst GET, all in the RX buffer at once.
     crcLine(PSTR("@SM GET F CIRCLE RIGHTL"));
     const uint8_t getLen = static_cast<uint8_t>(strlen(gLine) + 1);
     memset(junk, 'j', 63 - getLen);
@@ -313,23 +197,20 @@ static void test_line_input() {
     SerialPoke::inject(Serial1, gLine);
     SerialPoke::inject(Serial1, "\r");
     drainAll();
-    t = ticksOf([] { runtime.pump(Serial1, wcbLines, port); });
-    TEST_ASSERT_EQUAL_INT(0, Serial1.available());
-    TEST_ASSERT_TRUE(tx.used() > 80);
-    drainAll();
-    record(PSTR("pump(): 63 bytes ending the worst GET (read + handleLine)"), t, false,
-           static_cast<uint8_t>(null.last - 8));
+    t = ticksOf([] { runtime.pump(SMT_WCB_UART, wcbLines, port); });
+    record(PSTR("pump(): 63 bytes ending the worst GET"), t);
+    uint32_t now = 1000;
+    settle(now);
 
-    // Two requests in one pass (EVENTS's short reply leaves room for the GET's). The Pi sends one
-    // at a time, so this needs a second sender or a resend landing behind a request.
+    // Two requests in the RX buffer at once (a second sender, or a resend landing behind a
+    // request): EVENTS 1 and the worst GET.
     crcLine(PSTR("@SM EVENTS 1"));
     SerialPoke::inject(Serial1, gLine);
     SerialPoke::inject(Serial1, "\r");
     injectLine(PSTR("@SM GET F CIRCLE RIGHTL"));
-    t = ticksOf([] { runtime.pump(Serial1, wcbLines, port); });
-    TEST_ASSERT_EQUAL_INT(0, Serial1.available());
-    drainAll();
-    record(PSTR("pump(): two requests in one pass (EVENTS 1 + the worst GET)"), t);
+    t = ticksOf([] { runtime.pump(SMT_WCB_UART, wcbLines, port); });
+    record(PSTR("pump(): two requests in the RX buffer (EVENTS 1 + the worst GET)"), t);
+    settle(now);
 
     // A 72-char line split over two passes; the second ends it (bad CRC).
     memset(body, 'x', 62);
@@ -340,11 +221,11 @@ static void test_line_input() {
     first[63] = '\0';
     SerialPoke::inject(Serial1, first);
     Worst w;
-    w.add(ticksOf([] { runtime.pump(Serial1, wcbLines, port); }));
+    w.add(ticksOf([] { runtime.pump(SMT_WCB_UART, wcbLines, port); }));
     SerialPoke::inject(Serial1, body + 63);
-    w.add(ticksOf([] { runtime.pump(Serial1, wcbLines, port); }));
-    drainAll();
+    w.add(ticksOf([] { runtime.pump(SMT_WCB_UART, wcbLines, port); }));
     record(PSTR("pump(): worst pass of a 72-char line over two passes (bad CRC)"), w.ticks);
+    settle(now);
 }
 
 static void test_uart_drain() {
@@ -357,19 +238,19 @@ static void test_uart_drain() {
     TEST_ASSERT_TRUE(tx.pushLine(parts, 1));
     SerialPoke::dropTx1();
     TEST_ASSERT_EQUAL_INT(63, Serial1.availableForWrite());
-    const uint16_t t = ticksOf([] { tx.drain(Serial1); });
+    const uint16_t t = ticksOf([] { tx.drain(SMT_WCB_UART); });
     // 64: an idle UART takes the first byte straight into UDR, which leaves the ring's 63.
     TEST_ASSERT_EQUAL_UINT8(87 - 64, tx.used());
-    record(PSTR("drain(): 64 bytes into Serial1 (HardwareSerial, UART idle)"), t);
+    record(PSTR("drain(): 64 bytes into Serial1 (UART idle)"), t);
     SerialPoke::inject(Serial1, "012345678901234567890123456789012345678901234567890123456789012");
-    TEST_ASSERT_EQUAL_INT(63, Serial1.available());
+    TEST_ASSERT_EQUAL_INT(63, SMT_WCB_UART.available());
     const uint16_t rx = ticksOf([] {
-        while (Serial1.available() > 0)
-            gSink8 = static_cast<uint8_t>(Serial1.read());
+        while (SMT_WCB_UART.available() > 0)
+            gSink8 = static_cast<uint8_t>(SMT_WCB_UART.read());
     });
-    part(PSTR("63 x Serial1.available() + read()"), rx);
+    part(PSTR("63 x Serial1 available() + read()"), rx);
     SerialPoke::dropTx1();
-    tx.drain(Serial1);
+    tx.drain(SMT_WCB_UART);
     SerialPoke::dropTx1();
 }
 
@@ -393,14 +274,20 @@ static void test_loop_passes() {
     SerialPoke::inject(Serial1, junk);
     SerialPoke::inject(Serial1, gLine);
     SerialPoke::inject(Serial1, "\r");
-    loopPass(t0 + Runtime::kLongPressMs, kFootRight, kDomeCircle);
-    TEST_ASSERT_TRUE(gAny);
-    TEST_ASSERT_EQUAL_UINT8(kWide, gFired.slot);
     WorstPass get;
-    get.add(gLast);
+    bool fired = false;
+    uint32_t now = t0 + Runtime::kLongPressMs;
+    for (uint8_t i = 0; i < 6; ++i, now += 2) {
+        loopPass(now, kFootRight, kDomeCircle);
+        if (gAny) {
+            TEST_ASSERT_EQUAL_UINT8(kWide, gFired.slot);
+            fired = true;
+        }
+        get.add(gLast);
+    }
+    TEST_ASSERT_TRUE(fired);
+    settle(now, &get);
     recordPass(PSTR("loop pass: worst GET + long press fires + drain into Serial1"), get);
-    for (uint8_t i = 0; i < 10; ++i)
-        loopPass(t0 + 700 + i, kNone, kNone);
 
     // A SUM in progress (no output until its end) with a single press, and its PRESS line, on
     // every other pass; run twice so every slot's pass meets a press.
@@ -408,16 +295,15 @@ static void test_loop_passes() {
     for (uint8_t phase = 0; phase < 2; ++phase) {
         drainAll();
         request(PSTR("@SM SUM"));
-        uint32_t now = 100000UL + phase * 100000UL;
-        for (uint16_t i = 0; i < 600 && protocol.opInProgress(); ++i) {
-            const bool press = (i & 1) == phase && i < kSlotCount + 4;  // then let the reply out
+        now = 100000UL + phase * 100000UL;
+        for (uint16_t i = 0; i < 900 && protocol.opInProgress(); ++i) {
+            const bool press = (i & 1) == phase && i < 2 * kSlotCount + 8;  // then let the reply out
             now += press ? 1100 : 10;  // past the shared one-second repeat timer
             loopPass(now, press ? kFootCircle : kNone, press ? kDomeRight : kNone);
             sum.add(gLast);
         }
         TEST_ASSERT_FALSE(protocol.opInProgress());
-        for (uint8_t i = 0; i < 10; ++i)
-            loopPass(now + 10 + i, kNone, kNone);
+        settle(now);
     }
     recordPass(PSTR("loop pass: SUM slot pass + single press with PRESS line + drain"), sum);
 
@@ -427,22 +313,26 @@ static void test_loop_passes() {
     runtime.startBattery(port, 0);
     request(PSTR("@SM DUMP"));
     WorstPass w;
-    uint32_t now = 300000UL;
-    for (uint16_t i = 0; i < 1200 && protocol.opInProgress(); ++i) {
+    now = 300000UL;
+    for (uint16_t i = 0; i < 2400 && protocol.opInProgress(); ++i) {
         now += 10;
         loopPass(now, kNone, kNone, 1, 1);
         w.add(gLast);
     }
     TEST_ASSERT_FALSE(protocol.opInProgress());
+    for (uint8_t i = 0; i < 10; ++i) {
+        now += 10;
+        loopPass(now, kNone, kNone, 1, 1);
+        w.add(gLast);
+    }
     recordPass(PSTR("loop pass: DUMP (worst slot) + battery and announce due + drain"), w);
-    for (uint8_t i = 0; i < 10; ++i)
-        loopPass(now + 10 + i, kNone, kNone, 1, 1);
 
     // A SET of F CIRCLE LEFTL (an erased long-press slot: all 18 bytes written) arriving over
     // Serial1 while F CIRCLE RIGHT is held for its long press. The EEPROM stays busy for two
     // passes after each byte (3.4 ms on the Mega), so the long press can come due mid-write and
-    // be deferred to the next pass. Swept over where the press falls.
-    WorstPass sweep;
+    // be deferred to the next pass. Swept over where the press falls; a pass where it fires as the
+    // write finishes (the RAM bit's reload) is T2.
+    ClassWorst sweep;
     for (uint8_t offset = 0; offset < 12; ++offset) {
         worstState();
         io.busyPasses = 2;
@@ -452,31 +342,35 @@ static void test_loop_passes() {
         injectLine(PSTR("@SM SET F CIRCLE LEFTL zyxwvutsrqponml"));
         for (uint16_t i = 0; i < 120; ++i) {
             loopPass(at, kFootRight, kDomeCircle);
-            sweep.add(gLast);
+            sweep.add();
             at += 2;
         }
         TEST_ASSERT_FALSE(store.busy());
         TEST_ASSERT_FALSE(protocol.opInProgress());
     }
     io.busyPasses = 0;
-    recordPass(PSTR("loop pass: SET in flight (paced EEPROM) + long press, swept"), sweep);
+    recordPass(PSTR("loop pass: SET in flight (paced EEPROM) + long press, swept"), sweep.t1);
+    if (sweep.t2.passes > 0)
+        recordPass(PSTR("loop pass: SET finishing + long press fires, swept"), sweep.t2, kT2);
 
     // DEFAULTS in flight, with presses.
     worstState();
     io.busyPasses = 2;
     injectLine(PSTR("@SM DEFAULTS"));
-    w = WorstPass();
+    ClassWorst defaults;
     now = 400000UL;
-    for (uint16_t i = 0; i < 400 && (store.busy() || protocol.opInProgress() || i < 2); ++i) {
+    for (uint16_t i = 0; i < 400 && (store.busy() || protocol.opInProgress() || i < 4); ++i) {
         const bool press = (i & 1) == 0;
         now += press ? 1100 : 10;
         loopPass(now, press ? kFootCircle : kNone, press ? kDomeRight : kNone);
-        w.add(gLast);
+        defaults.add();
     }
     io.busyPasses = 0;
     TEST_ASSERT_FALSE(store.busy());
     TEST_ASSERT_EQUAL_UINT16(65535, store.generation());
-    recordPass(PSTR("loop pass: DEFAULTS in flight (paced EEPROM) + presses"), w);
+    recordPass(PSTR("loop pass: DEFAULTS in flight (paced EEPROM) + presses"), defaults.t1);
+    if (defaults.t2.passes > 0)
+        recordPass(PSTR("loop pass: DEFAULTS finishing + press fires"), defaults.t2, kT2);
 
     // A write that fails its verify twice (a worn cell): the ERR eeprom reply.
     worstState();
@@ -490,7 +384,7 @@ static void test_loop_passes() {
     }
     io.corrupt = false;
     TEST_ASSERT_FALSE(protocol.opInProgress());
-    record(PSTR("service(): ERR eeprom reply (a write failed its verify)"), err.ticks, false,
+    record(PSTR("service(): ERR eeprom reply (a write failed its verify)"), err.ticks, kT1,
            static_cast<uint8_t>(null.last - 8));
 }
 
