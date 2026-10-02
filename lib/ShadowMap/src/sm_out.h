@@ -9,8 +9,9 @@
 
 namespace sm {
 
-// The longest line, before port framing: Protocol::kMaxLine.
-constexpr uint8_t kLineMax = 80;
+// The longest line, before port framing: Protocol::kMaxLine. A SLOT with a 15-character raw
+// command ("!" and 30 hex digits) and a 15-character default on F CIRCLE RIGHTL is 93 with its CRC.
+constexpr uint8_t kLineMax = 96;
 
 class Out {
   public:
@@ -30,6 +31,9 @@ class Out {
     Out &hex(const char *s);        // each byte as two hex digits; "" as "-"
     Out &hex32(uint32_t v);         // eight hex digits
     Out &key(const char *k) { return *k == '\0' ? c('-') : s(k); }
+    // A slot's command: a key, "-" for none, or a raw command as "!" and its bytes in hex.
+    Out &value(const char *k, bool raw) { return raw && *k != '\0' ? rawHex(k) : key(k); }
+    Out &rawHex(const char *s);  // "!" and each byte as two hex digits, one room check
     Out &slot(uint8_t slot);  // "F L1 UP"
     // A line's start, on an empty Out: "@SM SLOT " or "@SM PRESS " and the slot's name. The CRC32
     // state after "<head><ctrl> <mod> " comes from a table the compiler works out, so finish()
@@ -43,14 +47,14 @@ class Out {
     uint8_t len() const { return len_; }
 
   private:
-    bool reserve(uint16_t n) {
+    __attribute__((always_inline)) bool reserve(uint16_t n) {
         if (overflow_ || len_ + n > kLineMax) {
             overflow_ = true;
             return false;
         }
         return true;
     }
-    void advance(uint8_t n) {
+    __attribute__((always_inline)) void advance(uint8_t n) {
         len_ = static_cast<uint8_t>(len_ + n);
         buf_[len_] = '\0';
     }

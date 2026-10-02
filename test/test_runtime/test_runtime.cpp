@@ -252,7 +252,7 @@ static void test_pump_reads_requests_through_noise() {
     }
     char body[96];
     TEST_ASSERT_TRUE(stripCrc(rig->wcb.usb.last(), body, sizeof(body)));
-    TEST_ASSERT_EQUAL_STRING("@SM READY v3 fw=2.0.0 slots=216 gen=0 fmt=0 pads=F", body);
+    TEST_ASSERT_EQUAL_STRING("@SM READY v4 fw=2.0.0 slots=216 gen=0 fmt=0 pads=F", body);
 }
 
 static void test_pump_work_per_pass_is_bounded() {

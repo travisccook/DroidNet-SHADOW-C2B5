@@ -271,6 +271,8 @@ void mappedButtons() {
     output += name;
     output += " -> ";
     output += fired.key[0] != '\0' ? fired.key : "(unmapped)";
+    if (fired.raw)
+        output += " (raw)";
     if (fired.modFromOther)
         output += " (modifier held on the other controller)";
     if (fired.key[0] != '\0' && !fired.queued)

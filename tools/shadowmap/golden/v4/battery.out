@@ -1,0 +1,36 @@
+;S0@SM READY v4 fw=sim slots=216 gen=0 fmt=0 pads=- *B621F81F
+!!IDLE 62
+!!IDLE 64
+@WDP1 {"type":"Shadow","fw":"sim"}
+;S0@SM BAT F=OK D=OK fs=5 ds=5 up=2 hb=30 *174C3B74
+!!IDLE 6064
+!!IDLE 6066
+;S0@SM BAT F=LOW D=OK fs=2 ds=5 up=9 hb=30 *C001FE5C
+!!IDLE 10066
+;S0@SM BAT F=LOW D=OK fs=2 ds=5 up=10 hb=30 *399BB5E6
+!!IDLE 10120
+!!IDLE 10122
+;S0@SM BAT F=CRIT D=CRIT fs=1 ds=1 up=13 hb=30 *EACAF2EF
+!!IDLE 14122
+!!IDLE 14124
+@WDP1 {"type":"Shadow","fw":"sim"}
+;S0@SM BAT F=CRIT D=CRIT fs=chg ds=usb up=43 hb=30 *F7D406EA
+;S0@SM BAT F=OK D=OK fs=chg ds=usb up=44 hb=30 *471442AA
+!!IDLE 45124
+;S0@SM BAT F=OK D=OK fs=chg ds=usb up=45 hb=30 *E163491E
+!!IDLE 45182
+!!IDLE 45184
+!!IDLE 48184
+;S0@SM BAT F=- D=- fs=- ds=- up=48 hb=30 *B43D0041
+!!IDLE 49237
+!!IDLE 52237
+!!IDLE 52239
+;W1;Csinglemuse
+@WDP1 {"type":"Shadow","fw":"sim"}
+!!IDLE 53292
+;S0@SM BAT F=OK D=OK fs=3 ds=4 up=54 hb=30 *F27C0366
+@WDP1 {"type":"Shadow","fw":"sim"}
+;S0@SM BAT F=OK D=OK fs=3 ds=4 up=84 hb=30 *697916B7
+!!IDLE 88292
+;S0@SM BAT F=OK D=OK fs=3 ds=4 up=88 hb=30 *AED97CC3
+!!IDLE 88346

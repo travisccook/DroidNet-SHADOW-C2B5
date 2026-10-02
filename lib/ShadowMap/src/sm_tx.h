@@ -63,5 +63,13 @@ constexpr uint8_t kCommandHeadroom = kPrefixMax + kKeyMax + kSuffixMax + 1;
 
 // Queues prefix + key + suffix + '\r'. Ignores the headroom: this is what it is reserved for.
 bool pushCommand(TxQueue &tx, const char *prefix, const char *key, const char *suffix);
+// The same with the prefix's and suffix's lengths already known (MapStore keeps them).
+bool pushCommand(TxQueue &tx, const char *prefix, uint8_t prefixLen, const char *key, const char *suffix,
+                 uint8_t suffixLen);
+
+// Queues a raw command: the text exactly as typed, then '\r', with no prefix or suffix. Ignores
+// the headroom, like pushCommand: a raw command (16 bytes at most) always fits in it.
+bool pushRaw(TxQueue &tx, const char *text);
+static_assert(kKeyMax + 1 <= kCommandHeadroom, "a raw command must fit the command headroom");
 
 }  // namespace sm

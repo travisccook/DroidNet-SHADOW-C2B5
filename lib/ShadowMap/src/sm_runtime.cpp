@@ -158,18 +158,21 @@ bool Runtime::fireOrDefer(uint8_t slot, bool modFromOther, uint32_t nowMs, Fired
 bool Runtime::fire(uint8_t slot, bool modFromOther, FiredPress *fired) {
     char key[kKeyBuf];
     Source src = Source::Default;
-    if (!store_.keyForSlot(slot, key, &src))
+    bool raw = false;
+    if (!store_.keyForSlot(slot, key, &src, &raw))
         return false;
     fired_ = true;
     bool queued = false;
     if (key[0] != '\0')
-        queued = pushCommand(tx_, store_.prefix(), key, store_.suffix());
-    protocol_.notifyPress(slot, key, src, modFromOther);
+        queued = raw ? pushRaw(tx_, key)
+                     : pushCommand(tx_, store_.prefix(), store_.prefixLen(), key, store_.suffix(), store_.suffixLen());
+    protocol_.notifyPress(slot, key, src, modFromOther, raw);
     if (fired != nullptr) {
         fired->slot = slot;
         memcpy(fired->key, key, kKeyBuf);
         fired->src = src;
         fired->modFromOther = modFromOther;
+        fired->raw = raw;
         fired->queued = queued;
     }
     return true;

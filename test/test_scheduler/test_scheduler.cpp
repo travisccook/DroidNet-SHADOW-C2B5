@@ -385,6 +385,31 @@ static void test_step_and_drain_run_every_pass() {
     settle();
 }
 
+// The writer's verify-and-finish step waits one pass when a press fires in its pass (once), and
+// runs on the next, press or not.
+static void test_a_finishing_step_waits_a_press_pass() {
+    rig->eeprom.writeTicks = 1;
+    TEST_ASSERT_TRUE(rig->store.beginSet(slotIndex(Ctrl::F, Mod::L1, Btn::UP), "abc") == MapStore::Result::Ok);
+    settle();  // formats, then writes the slot
+    TEST_ASSERT_TRUE(rig->store.beginSet(slotIndex(Ctrl::F, Mod::L1, Btn::UP, Tap::LONG), "xyz") == MapStore::Result::Ok);
+    for (uint16_t i = 0; i < 200 && !rig->store.finishDue(); ++i)
+        pass();
+    TEST_ASSERT_TRUE(rig->store.finishDue());
+    TEST_ASSERT_TRUE(pass({true, kHeldUp}, kNone, 1100));  // a press: the step waits
+    TEST_ASSERT_TRUE(rig->store.finishDue());
+    TEST_ASSERT_TRUE(pass({true, kHeldLeft}, kNone, 1100));  // another: it doesn't wait twice
+    TEST_ASSERT_FALSE(rig->store.finishDue());
+    TEST_ASSERT_FALSE(rig->store.busy());
+    TEST_ASSERT_TRUE(rig->store.longPressMapped(slotIndex(Ctrl::F, Mod::L1, Btn::UP)));
+    // Without a press it runs in its own pass.
+    TEST_ASSERT_TRUE(rig->store.beginSet(slotIndex(Ctrl::F, Mod::L1, Btn::UP, Tap::LONG), "") == MapStore::Result::Ok);
+    for (uint16_t i = 0; i < 200 && !rig->store.finishDue(); ++i)
+        pass();
+    pass();
+    TEST_ASSERT_FALSE(rig->store.busy());
+    settle();
+}
+
 int runAllTests() {
     UNITY_BEGIN();
     RUN_TEST(test_a_press_pass_takes_no_request_and_reads_little);
@@ -396,5 +421,6 @@ int runAllTests() {
     RUN_TEST(test_one_unit_a_light_pass_in_order);
     RUN_TEST(test_background_lines_during_dump_and_sum);
     RUN_TEST(test_step_and_drain_run_every_pass);
+    RUN_TEST(test_a_finishing_step_waits_a_press_pass);
     return UNITY_END();
 }

@@ -4,7 +4,8 @@
 //   reply:    @SM <WORD> [args] *<CRC32>
 //
 // The CRC is CRC32 (IEEE, as zlib) of everything before " *", as 8 hex digits. Nothing in a
-// line ever contains '^' (the WCB splits commands on it). See WIPDocs/COMMAND_MAPPING_DESIGN.md.
+// line ever contains '^' (the WCB splits commands on it): prefix, suffix and raw commands travel
+// hex-encoded (a raw command as "!" and its bytes). See WIPDocs/COMMAND_MAPPING_DESIGN.md.
 #pragma once
 
 #include <stdint.h>
@@ -59,7 +60,11 @@ class WcbPort final : public ReplyPort {
 
 class Protocol {
   public:
-    static constexpr uint8_t kMaxLine = kLineMax;  // longest reply, before port framing (80)
+    // Longest reply, before port framing: a SLOT with a 15-character raw command ("!" and 30 hex
+    // digits) and a 15-character default on F CIRCLE RIGHTL is 93 with its CRC.
+    static constexpr uint8_t kMaxLine = kLineMax;  // 96
+    // The shortest PRESS line: "@SM PRESS F L1 UP - eeprom *XXXXXXXX".
+    static constexpr uint8_t kPressLineMin = 36;
 
     Protocol(MapStore &store, const char *fwVersion) : store_(store), fw_(fwVersion) {}
 
@@ -90,9 +95,10 @@ class Protocol {
     // serviceLine(), or else serviceSum(): one unit. Runtime::service calls the two itself.
     bool service() { return serviceLine() || serviceSum(); }
 
-    // A combo reached the mapping (mapped or not). Sent to whichever port asked for EVENTS,
-    // if there's room; `modFromOther` says the modifier was held on the other controller.
-    void notifyPress(uint8_t slot, const char *key, Source src, bool modFromOther);
+    // A combo reached the mapping (mapped or not). Sent to whichever port asked for EVENTS, if it
+    // has room for this line; `modFromOther` says the modifier was held on the other controller,
+    // `raw` that `key` is a raw command (sent as "!<hex>").
+    void notifyPress(uint8_t slot, const char *key, Source src, bool modFromOther, bool raw = false);
 
     // Controller connection state, for READY and (with EVENTS on) "@SM CTL" events.
     void setPads(bool footConnected, bool domeConnected);
@@ -122,7 +128,10 @@ class Protocol {
     Op op_ = Op::None;
     ReplyPort *opPort_ = nullptr;
     uint8_t opSlot_ = kNoSlot;
-    char opArg_[2 * kPrefixMax + 1] = {};  // key or hex echo for the OK reply
+    // The OK reply's echo: a key, a raw command as "!" + 30 hex digits, or PREFIX/SUFFIX's hex.
+    static constexpr uint8_t kOpArgBuf = 2 + 2 * kKeyMax;
+    static_assert(kOpArgBuf >= 2 * kPrefixMax + 1, "PREFIX's hex echo must fit opArg_");
+    char opArg_[kOpArgBuf] = {};
     bool replyPending_ = false;
     bool opOk_ = false;
     uint8_t dumpNext_ = 0;  // next slot for DUMP / SUM
@@ -134,6 +143,7 @@ class Protocol {
     ReplyPort *slotOutPort_ = nullptr;
     char slotOutKey_[kKeyBuf] = {};
     Source slotOutSrc_ = Source::Default;
+    bool slotOutRaw_ = false;
 
     ReplyPort *eventPort_ = nullptr;
     uint8_t pads_ = 0;          // bit 0 foot, bit 1 dome

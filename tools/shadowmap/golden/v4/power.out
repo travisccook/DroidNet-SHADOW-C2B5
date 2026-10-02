@@ -1,0 +1,115 @@
+;S0@SM READY v4 fw=sim slots=216 gen=0 fmt=0 pads=- *B621F81F
+!!IDLE 62
+;S0@SM OK SET F NONE LEFT firstvalue *B34A6ABD
+!!IDLE 318
+!!IDLE 318
+;S0@SM ERR eeprom SET F NONE LEFT *D6D4F8A7
+!!IDLE 438
+!!IDLE 438
+;S0@SM READY v4 fw=sim slots=216 gen=0 fmt=1 pads=- *7A8BF881
+!!IDLE 500
+;S0@SM SLOT F NONE LEFT firstvalue eeprom def=scaredsound *BE7EDB34
+!!IDLE 568
+;S0@SM OK SET F NONE LEFT firstvalue *B34A6ABD
+!!IDLE 620
+!!IDLE 620
+;S0@SM ERR eeprom SET F NONE LEFT *D6D4F8A7
+!!IDLE 740
+!!IDLE 740
+;S0@SM READY v4 fw=sim slots=216 gen=0 fmt=1 pads=- *7A8BF881
+!!IDLE 802
+;S0@SM SLOT F NONE LEFT scaredsound default def=scaredsound *8FD009F8
+!!IDLE 872
+;S0@SM OK SET F NONE LEFT firstvalue *B34A6ABD
+!!IDLE 928
+!!IDLE 928
+;S0@SM ERR eeprom SET F NONE LEFT *D6D4F8A7
+!!IDLE 1048
+!!IDLE 1048
+;S0@SM READY v4 fw=sim slots=216 gen=0 fmt=1 pads=- *7A8BF881
+!!IDLE 1110
+;S0@SM SLOT F NONE LEFT scaredsound default def=scaredsound *8FD009F8
+!!IDLE 1180
+;S0@SM OK SET F NONE LEFT firstvalue *B34A6ABD
+!!IDLE 1244
+!!IDLE 1244
+;S0@SM ERR eeprom SET F NONE LEFT *D6D4F8A7
+!!IDLE 1364
+!!IDLE 1364
+;S0@SM READY v4 fw=sim slots=216 gen=0 fmt=1 pads=- *7A8BF881
+!!IDLE 1426
+;S0@SM SLOT F NONE LEFT scaredsound default def=scaredsound *8FD009F8
+!!IDLE 1496
+;S0@SM OK SET F NONE LEFT firstvalue *B34A6ABD
+!!IDLE 1576
+!!IDLE 1576
+;S0@SM ERR eeprom SET F NONE LEFT *D6D4F8A7
+!!IDLE 1696
+!!IDLE 1696
+;S0@SM READY v4 fw=sim slots=216 gen=0 fmt=1 pads=- *7A8BF881
+!!IDLE 1758
+;S0@SM SLOT F NONE LEFT scaredsound default def=scaredsound *8FD009F8
+!!IDLE 1828
+;S0@SM OK SET F NONE LEFT firstvalue *B34A6ABD
+!!IDLE 1928
+!!IDLE 1928
+;S0@SM OK SET F NONE LEFT zyxwvutsrqponml *77890F7D
+!!IDLE 2052
+!!IDLE 2052
+;S0@SM READY v4 fw=sim slots=216 gen=0 fmt=1 pads=- *7A8BF881
+!!IDLE 2114
+;S0@SM SLOT F NONE LEFT zyxwvutsrqponml eeprom def=scaredsound *53E58C61
+!!IDLE 2188
+;S0@SM OK SET F NONE LEFT firstvalue *B34A6ABD
+!!IDLE 2308
+!!IDLE 2308
+;S0@SM OK SET F NONE LEFT zyxwvutsrqponml *77890F7D
+!!IDLE 2432
+!!IDLE 2432
+;S0@SM READY v4 fw=sim slots=216 gen=0 fmt=1 pads=- *7A8BF881
+!!IDLE 2494
+;S0@SM SLOT F NONE LEFT zyxwvutsrqponml eeprom def=scaredsound *53E58C61
+!!IDLE 2568
+;S0@SM OK SET F NONE LEFT firstvalue *B34A6ABD
+!!IDLE 2688
+!!IDLE 2688
+;S0@SM OK SET F NONE LEFT zyxwvutsrqponml *77890F7D
+!!IDLE 2812
+!!IDLE 2812
+;S0@SM READY v4 fw=sim slots=216 gen=0 fmt=1 pads=- *7A8BF881
+!!IDLE 2874
+;S0@SM SLOT F NONE LEFT zyxwvutsrqponml eeprom def=scaredsound *53E58C61
+!!IDLE 2948
+;S0@SM OK SET F NONE LEFT firstvalue *B34A6ABD
+!!IDLE 3068
+!!IDLE 3068
+;S0@SM ERR eeprom DEFAULTS *C01D5074
+!!IDLE 3242
+!!IDLE 3242
+;S0@SM READY v4 fw=sim slots=216 gen=0 fmt=1 pads=- *7A8BF881
+!!IDLE 3304
+;S0@SM SUM A2F35AC3 slots=216 *B1428EAB
+!!IDLE 3776
+!!IDLE 3776
+;S0@SM ERR eeprom PREFIX *9FCC148B
+!!IDLE 3928
+!!IDLE 3928
+;S0@SM CFG pre=3B57313B43 suf=- *033F6222
+!!IDLE 3970
+;S0@SM OK SET F NONE UPL held *626C1749
+!!IDLE 4086
+!!IDLE 4086
+;S0@SM SLOT F NONE UPL held eeprom def=- *878B3DD1
+!!IDLE 4138
+;W1;Cheld
+!!IDLE 4838
+@WDP1 {"type":"Shadow","fw":"sim"}
+!!IDLE 5938
+!!IDLE 5938
+;S0@SM ERR eeprom REVERT F NONE UPL *BA41A6EE
+!!IDLE 6064
+!!IDLE 6064
+;S0@SM SLOT F NONE UPL - default def=- *C98B1339
+!!IDLE 6114
+;S0@SM SUM A2F35AC3 slots=216 *B1428EAB
+!!IDLE 6586

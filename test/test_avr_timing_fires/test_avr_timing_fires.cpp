@@ -26,25 +26,33 @@ constexpr PadState kDomeCircleUpHeld = {true, kHeldCircle | kHeldUp};
 constexpr PadState kDomeCircleDownHeld = {true, kHeldCircle | kHeldDown};
 
 // `body` arrives, and every pass of its write runs with nothing held but the one where the writer
-// is due to finish its job: there a single press fires (D CIRCLE RIGHT from=F, stale record).
-WorstPass pressAsItFinishes(PGM_P body, uint8_t *finishes) {
+// is due to finish its job: there a single press fires (D CIRCLE RIGHT from=F, stale record). The
+// finishing step then waits for the next pass (Runtime::service), whose worst goes into `after`.
+WorstPass pressAsItFinishes(PGM_P body, uint8_t *finishes, WorstPass *after) {
     WorstPass w;
     *finishes = 0;
+    bool pressed = false;
     injectLine(body);
     for (uint16_t i = 0; i < 600; ++i) {
         if (!wcbLines.ready() && Serial1.available() == 0 && !store.busy() && !protocol.opInProgress() &&
             tx.used() == 0)
             break;
-        if (store.finishDue() && io.ready()) {
+        if (store.finishDue() && io.ready() && !pressed) {
             gNow += 1100;  // past the shared one-second repeat timer
             loopPass(gNow, kFootCircle, kDomeRight);
             TEST_ASSERT_TRUE(gAny);
             TEST_ASSERT_TRUE(gFinishing);
+            TEST_ASSERT_TRUE(store.finishDue());  // it waited
             w.add(gLast);
             ++*finishes;
+            pressed = true;
         } else {
+            const bool finishing = store.finishDue();
             gNow += 2;
             loopPass(gNow, kNone, kNone);
+            if (pressed && finishing)
+                after->add(gLast);
+            pressed = false;
         }
     }
     settle(gNow);
@@ -60,20 +68,26 @@ static void test_press_as_a_write_finishes() {
     io.busyPasses = 2;
     settle(gNow);
     uint8_t finishes = 0;
-    WorstPass w = pressAsItFinishes(PSTR("@SM SET D L2 LEFTL zyxwvutsrqponml"), &finishes);
+    WorstPass after;
+    WorstPass w = pressAsItFinishes(PSTR("@SM SET D L2 LEFTL zyxwvutsrqponml"), &finishes, &after);
     TEST_ASSERT_EQUAL_UINT8(1, finishes);
-    recordPass(PSTR("press + SET's last step (long-press slot: RAM bit reload)"), w, kT2);
+    recordPass(PSTR("press as SET's last step comes due (the step waits a pass)"), w, kT2);
+    recordPass(PSTR("the pass after: SET's last step (long-press slot: RAM bit reload)"), after);
 
-    w = pressAsItFinishes(PSTR("@SM DEFAULTS"), &finishes);
+    after = WorstPass();
+    w = pressAsItFinishes(PSTR("@SM DEFAULTS"), &finishes, &after);
     TEST_ASSERT_EQUAL_UINT8(1, finishes);
     TEST_ASSERT_EQUAL_UINT16(65535, store.generation());
-    recordPass(PSTR("press + DEFAULTS' last step (every RAM bit reloaded)"), w, kT2);
+    recordPass(PSTR("press as DEFAULTS' last step comes due (the step waits a pass)"), w, kT2);
+    recordPass(PSTR("the pass after: DEFAULTS' last step (every RAM bit reloaded)"), after);
 
     eeErase();
     store.begin();
-    w = pressAsItFinishes(PSTR("@SM SET D L2 LEFTL zyxwvutsrqponml"), &finishes);
+    after = WorstPass();
+    w = pressAsItFinishes(PSTR("@SM SET D L2 LEFTL zyxwvutsrqponml"), &finishes, &after);
     TEST_ASSERT_EQUAL_UINT8(2, finishes);  // the header, then the slot
-    recordPass(PSTR("press + a first write's last steps (format, then the slot)"), w, kT2);
+    recordPass(PSTR("press as a first write's last steps come due (format, then the slot)"), w, kT2);
+    recordPass(PSTR("the pass after: a first write's last steps"), after);
 }
 
 static void test_two_presses() {
@@ -125,7 +139,8 @@ namespace {
 //     DOWN in P: another combo, so D CIRCLE UP fires as a single press in P;
 //   - D CIRCLE DOWN: with its double tap mapped it waits; without, it fires at once;
 //   - F CIRCLE RIGHT (CIRCLE from the dome), held since P - 600 ms: its long press fires in P.
-// With `finishing`, a SET's verify-and-finish step is due in P too, and there is no deferred press:
+// With `finishing`, a SET's verify-and-finish step is due in P too (it waits for the next pass,
+// as Runtime::service makes it after a press), and there is no deferred press:
 // a deferred press always skips the writer's next step (MapStore::readWanted_), so the two can't
 // meet. Three presses is then the most one pass can fire: the shared repeat timer lets one combo
 // fire at once a second, and a controller fires at most one press besides that.
@@ -180,7 +195,7 @@ WorstPass manyPresses(uint8_t fires, bool finishing) {
     TEST_ASSERT_TRUE(gAny);
     TEST_ASSERT_EQUAL_UINT8(kWide, gFired.slot);  // the last of them
     TEST_ASSERT_TRUE(gFinishing == finishing);
-    TEST_ASSERT_FALSE(store.finishDue());
+    TEST_ASSERT_TRUE(store.finishDue() == finishing);  // the finishing step waited
     w.add(gLast);
     gNow = p;
     loopPass(gNow += 2, kNone, kNone);
@@ -193,7 +208,7 @@ WorstPass manyPresses(uint8_t fires, bool finishing) {
 static void test_three_and_four_presses() {
     recordPass(PSTR("three presses in one pass (one deferred)"), manyPresses(3, false), kT3);
     recordPass(PSTR("four presses in one pass (one deferred)"), manyPresses(4, false), kT3);
-    recordPass(PSTR("three presses + a write's last step"), manyPresses(3, true), kT3);
+    recordPass(PSTR("three presses as a write's last step comes due"), manyPresses(3, true), kT3);
 }
 
 static void test_every_pass_is_under_1_ms() { checkBudget(); }

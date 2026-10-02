@@ -34,7 +34,7 @@ sys.path.insert(0, HERE)
 
 import transcripts as tx  # noqa: E402
 
-GOLDEN = os.path.join(HERE, "golden", "v3")
+GOLDEN = os.path.join(HERE, "golden", "v4")
 ROUTE = ";W20,;S0"  # the coincide session's reply route (HELLO 20)
 STREAMS = ("replies", "events", "bat", "commands", "announces")
 

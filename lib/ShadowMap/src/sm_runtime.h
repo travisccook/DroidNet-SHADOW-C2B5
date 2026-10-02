@@ -20,6 +20,7 @@ struct FiredPress {
     char key[kKeyBuf];  // "" = unmapped
     Source src;
     bool modFromOther;  // the modifier was held on the other controller
+    bool raw;           // key is a raw command, sent as typed
     bool queued;        // false only if the command didn't fit in the TX queue (shouldn't happen)
 };
 
@@ -140,7 +141,8 @@ class Runtime {
     // finishing), the first of these that has work does one unit: the announce (due every 25-30 s,
     // so it can't hold anything up, and nothing can hold it up), the protocol's next line or DUMP
     // read, the battery report (which a DUMP holds until its end, as before), a SUM step. Then,
-    // every pass, the EEPROM writer's step and the drain of queued bytes into the WCB's UART. Pass
+    // every pass, the EEPROM writer's step (whose finishing step waits a pass after a press) and
+    // the drain of queued bytes into the WCB's UART. Pass
     // `mayAnnounce` false while a controller fault is active: a due announce then waits for the
     // fault to clear. Battery reports carry on through a fault.
     template <class Serial>
@@ -150,7 +152,15 @@ class Runtime {
             if (!(mayAnnounce && announce(nowMs)) && !protocol_.serviceLine() && !reportBattery(nowMs))
                 protocol_.serviceSum();
         }
-        store_.step();
+        // The writer's verify-and-finish step (never a write) waits one pass when a press fired in
+        // this one, as a lookup's read makes it wait (MapStore's readWanted_): with @SM v4's PRESS
+        // events, three presses and a finishing job in one pass came to 1.04 ms.
+        if (fired_ && store_.finishDue() && !finishYielded_) {
+            finishYielded_ = true;
+        } else {
+            finishYielded_ = false;
+            store_.step();
+        }
         tx_.drain(wcb);
         fired_ = false;
         intake_ = false;
@@ -220,6 +230,7 @@ class Runtime {
     bool fired_ = false;   // a press fired
     bool intake_ = false;  // a request was taken in
     uint8_t rxBytes_ = 0;  // bytes read from both ports
+    bool finishYielded_ = false;  // the writer's finishing step waited out a press's pass
 };
 
 }  // namespace sm

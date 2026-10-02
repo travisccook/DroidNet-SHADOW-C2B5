@@ -75,7 +75,7 @@ class Out {
 
   private:
     bool reserve(size_t n) {
-        if (overflow_ || len_ + n > 80) {
+        if (overflow_ || len_ + n > Protocol::kMaxLine) {
             overflow_ = true;
             return false;
         }
@@ -85,7 +85,7 @@ class Out {
         len_ = static_cast<uint8_t>(len_ + n);
         buf_[len_] = '\0';
     }
-    char buf_[81];
+    char buf_[Protocol::kMaxLine + 1];
     uint8_t len_ = 0;
     bool overflow_ = false;
 };
@@ -412,13 +412,15 @@ DefaultMapping gAllDefaults[kSlotCount];
 }  // namespace
 
 // Every slot with a 15-character default and a 15-character record, stale (so its line says
-// "default", the longer word) or valid: every DUMP line fits kMaxLine and SUM covers them all.
+// "default", the longer word), valid, or a 15-character raw command ("!" and 30 hex digits):
+// every DUMP line fits kMaxLine (93 at most) and SUM covers them all.
 static void test_every_slot_at_its_longest_fits() {
     for (uint8_t slot = 0; slot < kSlotCount; ++slot) {
         gAllDefaults[slot].slot = slot;
         memcpy(gAllDefaults[slot].key, "abcdefghijklmno", kKeyBuf);
     }
-    for (uint8_t stale = 0; stale < 2; ++stale) {
+    for (uint8_t stale = 0; stale < 3; ++stale) {  // keys, stale records, raw commands
+        const bool asRaw = stale == 2;
         static FullEeprom eeprom;
         memset(eeprom.mem, 0xFF, sizeof(eeprom.mem));
         MapStore store(eeprom, gAllDefaults, kSlotCount);
@@ -426,12 +428,13 @@ static void test_every_slot_at_its_longest_fits() {
         for (uint8_t slot = 0; slot < kSlotCount; ++slot) {
             if (slotReserved(slot) != Reserved::No)
                 continue;
-            TEST_ASSERT_TRUE(store.beginSet(slot, "zyxwvutsrqponml") == MapStore::Result::Ok);
+            TEST_ASSERT_TRUE(store.beginSet(slot, asRaw ? ";W2;S4PLAY:3^;T" : "zyxwvutsrqponml", asRaw) ==
+                             MapStore::Result::Ok);
             while (store.busy())
                 store.step();
             store.takeCompletion();
         }
-        if (stale != 0) {
+        if (stale == 1) {
             TEST_ASSERT_TRUE(store.beginDefaults() == MapStore::Result::Ok);  // every record now stale
             while (store.busy())
                 store.step();
@@ -460,7 +463,7 @@ static void test_every_slot_at_its_longest_fits() {
             }
         }
         TEST_ASSERT_EQUAL_UINT16(kSlotCount, lines);
-        TEST_ASSERT_EQUAL_UINT8(stale != 0 ? 78 : 77, longest);
+        TEST_ASSERT_EQUAL_UINT8(asRaw ? 93 : (stale != 0 ? 78 : 77), longest);
         TEST_ASSERT_TRUE(longest <= Protocol::kMaxLine);
         TEST_ASSERT_TRUE(protocol.handleLine("@SM SUM", port));
         for (uint16_t i = 0; i < 2000 && protocol.opInProgress(); ++i)
@@ -475,8 +478,135 @@ static void test_every_slot_at_its_longest_fits() {
 static void test_every_slot_at_its_longest_fits() { TEST_IGNORE_MESSAGE("host only (4 KB EEPROM image)"); }
 #endif
 
+constexpr uint8_t ROUTE_LEN = 3;  // ";S0", the route at start
+
+// The raw "!" value and the hex fields against a plain encoder.
+static void test_hex_values_match_a_reference_encoder() {
+    char text[20], want[64];
+    for (uint16_t r = 0; r < 2000; ++r) {
+        const uint8_t n = static_cast<uint8_t>(1 + rnd() % 15);
+        for (uint8_t i = 0; i < n; ++i)
+            text[i] = static_cast<char>(1 + rnd() % 255);
+        text[n] = '\0';
+        int k = 0;
+        for (uint8_t i = 0; i < n; ++i)
+            k += snprintf(want + k, sizeof(want) - static_cast<size_t>(k), "%02X", static_cast<uint8_t>(text[i]));
+        Out a, b;
+        a.hex(text);
+        b.value(text, true);
+        TEST_ASSERT_EQUAL_STRING(want, a.str());
+        TEST_ASSERT_EQUAL_CHAR('!', b.str()[0]);
+        TEST_ASSERT_EQUAL_STRING(want, b.str() + 1);
+        Out c;
+        c.value(text, false);
+        TEST_ASSERT_EQUAL_STRING(text, c.str());
+    }
+    Out e, f;
+    e.value("", true);
+    f.hex("");
+    TEST_ASSERT_EQUAL_STRING("-", e.str());
+    TEST_ASSERT_EQUAL_STRING("-", f.str());
+}
+
+namespace {
+
+struct Sink {
+    int availableForWrite() { return 255; }
+    size_t write(const uint8_t *, size_t n) { return n; }
+};
+
+// The queue emptied, then `fill` bytes of filler in it.
+void fillQueue(TxQueue &tx, uint8_t fill) {
+    Sink sink;
+    tx.drain(sink);
+    char line[TxQueue::kCapacity];
+    while (fill > 0) {
+        const uint8_t n = fill > 100 ? 100 : fill;
+        memset(line, 'f', n - 1);
+        line[n - 1] = '\0';
+        const char *parts[] = {line};
+        TEST_ASSERT_TRUE(tx.pushLine(parts, 1));
+        fill = static_cast<uint8_t>(fill - n);
+    }
+}
+
+}  // namespace
+
+// notifyPress checks for room before it builds the line and before its CRC; the event goes out
+// exactly when the plan's rule (build, finish, then canSend(its length)) would send it: every
+// queue fill 0-160, PRESS lines of every length 36-81. The shortest PRESS is 36.
+static void test_press_room_checks_match_format_then_check() {
+    static FakeEeprom eeprom;
+    eeprom.reset();
+    MapStore store(eeprom, kTestDefaults, kTestDefaultCount);
+    store.begin();
+    Protocol protocol(store, "t");
+    static TxQueue tx;
+    fillQueue(tx, 0);
+    WcbPort port(tx);
+    char line[64];
+    TEST_ASSERT_TRUE(protocol.handleLine(withCrc("@SM EVENTS 1", line, sizeof(line)), port));
+    uint8_t shortest = 0xFF, longest = 0;
+    bool seen[Protocol::kMaxLine + 1] = {};
+    char key[kKeyBuf];
+    uint32_t checks = 0;
+    for (uint8_t slot = 0; slot < kSlotCount; ++slot) {
+        for (uint8_t shape = 0; shape < 24; ++shape) {
+            const uint8_t keyLen = static_cast<uint8_t>((shape * 7 + slot) % 16);
+            memset(key, (shape & 8) != 0 ? '~' : 'k', keyLen);
+            key[keyLen] = '\0';
+            const bool raw = keyLen > 0 && (shape & 1) != 0;
+            const Source src = static_cast<Source>((shape >> 1) % 3);
+            const bool from = (shape & 16) != 0;
+            // The line, from the old builder.
+            old::Out want;
+            want.p("@SM PRESS ").slot(slot).c(' ');
+            if (raw)
+                want.c('!').hex(key);
+            else
+                want.key(key);
+            want.c(' ').p(src == Source::Eeprom ? "eeprom" : (src == Source::Reserved ? "reserved" : "default"));
+            if (from)
+                want.p(" from=").c(slotCtrl(slot) == Ctrl::F ? 'D' : 'F');
+            const Reserved why = slotReserved(slot);
+            if (why != Reserved::No)
+                want.p(" res=").p(why == Reserved::PsGate ? "psgate" : (why == Reserved::OverSpeed ? "overspeed" : "stick"));
+            TEST_ASSERT_TRUE(want.finish());
+            const uint8_t len = want.len();
+            shortest = len < shortest ? len : shortest;
+            longest = len > longest ? len : longest;
+            const bool first = !seen[len];
+            seen[len] = true;
+            if (!first && (slot + shape) % 11 != 0)
+                continue;  // every fill for the first line of each length, and a spread of others
+#if defined(__AVR__)
+            const uint8_t step = 13;  // the emulated Mega is slow: a spread of fills
+#else
+            const uint8_t step = 1;
+#endif
+            for (uint16_t fill = 0; fill <= TxQueue::kCapacity; fill += step) {
+                fillQueue(tx, static_cast<uint8_t>(fill));
+                const bool expect = port.canSend(len);
+                const uint8_t before = tx.used();
+                protocol.notifyPress(slot, key, src, from, raw);
+                TEST_ASSERT_EQUAL(expect, tx.used() != before);
+                if (expect)
+                    TEST_ASSERT_EQUAL_UINT8(before + ROUTE_LEN + len + 1, tx.used());
+                ++checks;
+            }
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT8(36, shortest);
+    TEST_ASSERT_EQUAL_UINT8(Protocol::kPressLineMin, shortest);
+    for (uint8_t len = 36; len <= 81; ++len)
+        TEST_ASSERT_TRUE_MESSAGE(seen[len], "a PRESS length not tried");
+    TEST_ASSERT_TRUE(checks > 400);
+}
+
 int runAllTests() {
     UNITY_BEGIN();
+    RUN_TEST(test_hex_values_match_a_reference_encoder);
+    RUN_TEST(test_press_room_checks_match_format_then_check);
     RUN_TEST(test_every_slot_at_its_longest_fits);
     RUN_TEST(test_u_matches_printf);
     RUN_TEST(test_u_thousandths_is_u_of_v_over_1000);

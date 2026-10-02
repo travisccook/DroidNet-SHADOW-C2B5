@@ -62,4 +62,21 @@ bool pushCommand(TxQueue &tx, const char *prefix, const char *key, const char *s
     return tx.pushLine(parts, 3);
 }
 
+bool pushCommand(TxQueue &tx, const char *prefix, uint8_t prefixLen, const char *key, const char *suffix,
+                 uint8_t suffixLen) {
+    const size_t keyLen = strlen(key);
+    if (keyLen >= TxQueue::kCapacity)
+        return false;
+    const char *parts[] = {prefix, key, suffix};
+    const uint8_t lens[] = {prefixLen, static_cast<uint8_t>(keyLen), suffixLen};
+    return tx.pushParts(parts, lens, 3);
+}
+
+bool pushRaw(TxQueue &tx, const char *text) {
+    const size_t n = strlen(text);
+    if (n >= TxQueue::kCapacity)
+        return false;
+    return tx.pushLine2(text, static_cast<uint8_t>(n), nullptr, 0);
+}
+
 }  // namespace sm

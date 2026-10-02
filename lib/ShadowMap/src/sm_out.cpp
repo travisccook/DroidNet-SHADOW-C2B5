@@ -156,6 +156,21 @@ Out &Out::hex(const char *src) {
     return *this;
 }
 
+Out &Out::rawHex(const char *src) {
+    const size_t n = strlen(src);
+    if (!reserve(static_cast<uint16_t>(1 + 2 * n)))
+        return *this;
+    char *d = buf_ + len_;
+    *d++ = '!';
+    for (; *src != '\0'; ++src) {
+        const uint8_t b = static_cast<uint8_t>(*src);
+        *d++ = hexDigit(hiNibble(b));
+        *d++ = hexDigit(static_cast<uint8_t>(b & 0x0F));
+    }
+    advance(static_cast<uint8_t>(1 + 2 * n));
+    return *this;
+}
+
 Out &Out::hex32(uint32_t v) {
     if (!reserve(8))
         return *this;
@@ -187,7 +202,11 @@ Out &Out::slot(uint8_t slot) {
 
 Out &Out::head(Head head, uint8_t slot) {
     const bool empty = len_ == 0;  // the states are for a line that starts here
-    p(head == Head::Press ? kPressHead : kSlotHead);
+    const uint8_t headLen = head == Head::Press ? sizeof(kPressHead) - 1 : sizeof(kSlotHead) - 1;
+    if (!reserve(headLen))
+        return *this;
+    memcpy_P(buf_ + len_, head == Head::Press ? kPressHead : kSlotHead, headLen);
+    advance(headLen);
     if (slot >= kSlotCount) {
         overflow_ = true;  // not a slot
         return *this;
