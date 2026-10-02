@@ -4,6 +4,7 @@
 
 #include "sm_crc.h"
 #include "sm_line.h"
+#include "sm_out.h"
 #include "sm_pgm.h"
 
 namespace sm {
@@ -13,93 +14,6 @@ namespace {
 constexpr uint8_t kProtocolVersion = 3;  // 2: double-tap slots; 3: long-press slots
 constexpr uint8_t kMaxRouteLen = 8;  // ";W20,;S0"
 constexpr uint8_t kMaxArgs = 7;
-
-const char kHexDigits[] = "0123456789ABCDEF";
-
-// Builds one reply line in a fixed buffer. Any overflow makes finish() fail, so a line is
-// either sent whole or not at all.
-class Out {
-  public:
-    Out() { buf_[0] = '\0'; }
-
-    Out &p(PGM_P s) {
-        const size_t n = strlen_P(s);
-        if (reserve(n)) {
-            memcpy_P(buf_ + len_, s, n);
-            advance(n);
-        }
-        return *this;
-    }
-    Out &s(const char *s) {
-        const size_t n = strlen(s);
-        if (reserve(n)) {
-            memcpy(buf_ + len_, s, n);
-            advance(n);
-        }
-        return *this;
-    }
-    Out &c(char ch) {
-        if (reserve(1)) {
-            buf_[len_] = ch;
-            advance(1);
-        }
-        return *this;
-    }
-    Out &u(uint32_t v) {
-        char tmp[10];
-        uint8_t n = 0;
-        do {
-            tmp[n++] = static_cast<char>('0' + v % 10);
-            v /= 10;
-        } while (v != 0);
-        while (n > 0)
-            c(tmp[--n]);
-        return *this;
-    }
-    // Each byte as two hex digits; an empty string is written as "-".
-    Out &hex(const char *s) {
-        if (*s == '\0')
-            return c('-');
-        for (; *s != '\0'; ++s) {
-            const uint8_t b = static_cast<uint8_t>(*s);
-            c(kHexDigits[b >> 4]).c(kHexDigits[b & 0x0F]);
-        }
-        return *this;
-    }
-    Out &key(const char *k) { return *k == '\0' ? c('-') : s(k); }
-    Out &slot(uint8_t slot) {
-        char tmp[kSlotTextBuf];
-        if (formatSlot(tmp, sizeof(tmp), slot) == 0)
-            overflow_ = true;
-        return s(tmp);
-    }
-    bool finish() {
-        const uint32_t crc = crc32(reinterpret_cast<const uint8_t *>(buf_), len_);
-        c(' ').c('*');
-        for (int8_t shift = 28; shift >= 0; shift -= 4)
-            c(kHexDigits[(crc >> shift) & 0x0F]);
-        return !overflow_;
-    }
-    const char *str() const { return buf_; }
-    uint8_t len() const { return len_; }
-
-  private:
-    bool reserve(size_t n) {
-        if (overflow_ || len_ + n > Protocol::kMaxLine) {
-            overflow_ = true;
-            return false;
-        }
-        return true;
-    }
-    void advance(size_t n) {
-        len_ = static_cast<uint8_t>(len_ + n);
-        buf_[len_] = '\0';
-    }
-
-    char buf_[Protocol::kMaxLine + 1];
-    uint8_t len_ = 0;
-    bool overflow_ = false;
-};
 
 void emit(Out &out, ReplyPort &port) {
     if (out.finish())
@@ -116,16 +30,19 @@ int8_t hexValue(char ch) {
     return -1;
 }
 
+// Exactly eight hex digits, either case, then the end of the line.
 bool parseCrc(const char *s, uint32_t *out) {
     uint32_t v = 0;
-    uint8_t n = 0;
-    for (; s[n] != '\0'; ++n) {
-        const int8_t d = hexValue(s[n]);
-        if (d < 0 || n >= 8)
+    for (uint8_t i = 0; i < 4; ++i) {
+        const int8_t hi = hexValue(s[2 * i]);
+        if (hi < 0)
             return false;
-        v = (v << 4) | static_cast<uint8_t>(d);
+        const int8_t lo = hexValue(s[2 * i + 1]);
+        if (lo < 0)
+            return false;
+        v = (v << 8) | static_cast<uint8_t>((hi << 4) | lo);
     }
-    if (n != 8)
+    if (s[8] != '\0')
         return false;
     *out = v;
     return true;
@@ -221,6 +138,23 @@ PGM_P sourceToken(Source src) {
     return PSTR("default");
 }
 
+// A SLOT line's text after the slot's name: " <key|-> <source> def=<default|->", or
+// " - reserved res=<reason>". `key` is what keyForSlot() gave; a Source::Default key is the
+// slot's default, so it isn't looked up twice.
+void slotRest(Out &out, const MapStore &store, uint8_t slot, const char *key, Source src) {
+    out.c(' ').key(key).c(' ').p(sourceToken(src));
+    const Reserved why = slotReserved(slot);
+    if (why != Reserved::No) {
+        out.p(PSTR(" res=")).p(reservedToken(why));
+    } else if (src == Source::Default) {
+        out.p(PSTR(" def=")).key(key);
+    } else {
+        char def[kKeyBuf];
+        store.defaultKey(slot, def);
+        out.p(PSTR(" def=")).key(def);
+    }
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------------------
@@ -232,11 +166,7 @@ bool WcbPort::canSend(uint8_t len) {
     return tx_.freeSpace() >= framed + kCommandHeadroom;
 }
 
-void WcbPort::send(const char *line, uint8_t len) {
-    (void)len;
-    const char *parts[] = {routeText_, line};
-    tx_.pushLine(parts, 2);
-}
+void WcbPort::send(const char *line, uint8_t len) { tx_.pushLine2(routeText_, routeLen_, line, len); }
 
 bool WcbPort::setRoute(uint8_t wcb) {
     if (wcb > kMaxRoute)
@@ -261,6 +191,7 @@ void WcbPort::buildRoute() {
     routeText_[n++] = 'S';
     routeText_[n++] = '0';
     routeText_[n] = '\0';
+    routeLen_ = n;
 }
 
 // ---------------------------------------------------------------------------------------
@@ -270,22 +201,28 @@ bool Protocol::handleLine(const char *line, ReplyPort &port) {
     if (!port.canSend(kMaxLine))
         return false;
 
+    // One pass copies the line and finds its end.
     char work[LineReader::kMaxLen + 1];
-    const size_t n = strlen(line);
-    if (n > LineReader::kMaxLen || n < 4 || strncmp(line, "@SM ", 4) != 0) {
+    const char *end = static_cast<const char *>(memccpy(work, line, '\0', sizeof(work)));
+    const uint8_t n = end != nullptr ? static_cast<uint8_t>(end - work - 1) : 0;
+    if (end == nullptr || n < 4 || strncmp(work, "@SM ", 4) != 0) {
         sendError(port, PSTR("args"), nullptr, kNoSlot);
         return true;
     }
-    memcpy(work, line, n + 1);
 
-    // Integrity: " *<crc>" at the end, over everything before it.
+    // Integrity: " *<crc>" at the end, over everything before it. The last " *" counts.
     char *star = nullptr;
-    for (char *p = work; (p = strstr(p, " *")) != nullptr; ++p)
-        star = p;
+    for (uint8_t i = n; i >= 2; --i) {
+        if (work[i - 2] == ' ' && work[i - 1] == '*') {
+            star = work + i - 2;
+            break;
+        }
+    }
     if (star != nullptr) {
         uint32_t given = 0;
-        const size_t bodyLen = static_cast<size_t>(star - work);
-        if (!parseCrc(star + 2, &given) || given != crc32(reinterpret_cast<const uint8_t *>(work), bodyLen)) {
+        const uint8_t bodyLen = static_cast<uint8_t>(star - work);
+        if (!parseCrc(star + 2, &given) ||
+            given != crc32Final(crc32Block(kCrc32Init, reinterpret_cast<const uint8_t *>(work), bodyLen))) {
             sendError(port, PSTR("crc"), nullptr, kNoSlot);
             return true;
         }
@@ -320,8 +257,10 @@ bool Protocol::handleLine(const char *line, ReplyPort &port) {
         return true;
     }
     const char *verb = argv[0];
+    // Each verb is compared in full only when its first character matches.
+    const char v0 = verb[0];
 
-    if (strcmp_P(verb, PSTR("HELLO")) == 0) {
+    if (v0 == 'H' && strcmp_P(verb, PSTR("HELLO")) == 0) {
         uint8_t route = 0;
         if (argc > 2 || (argc == 2 && !parseRoute(argv[1], &route))) {
             sendError(port, PSTR("args"), verb, kNoSlot);
@@ -339,7 +278,7 @@ bool Protocol::handleLine(const char *line, ReplyPort &port) {
         return true;
     }
 
-    if (strcmp_P(verb, PSTR("BAT")) == 0) {
+    if (v0 == 'B' && strcmp_P(verb, PSTR("BAT")) == 0) {
         if (argc != 1) {
             sendError(port, PSTR("args"), verb, kNoSlot);
             return true;
@@ -348,7 +287,7 @@ bool Protocol::handleLine(const char *line, ReplyPort &port) {
         return true;
     }
 
-    if (strcmp_P(verb, PSTR("CFG")) == 0) {
+    if (v0 == 'C' && strcmp_P(verb, PSTR("CFG")) == 0) {
         if (argc != 1) {
             sendError(port, PSTR("args"), verb, kNoSlot);
             return true;
@@ -359,7 +298,7 @@ bool Protocol::handleLine(const char *line, ReplyPort &port) {
         return true;
     }
 
-    if (strcmp_P(verb, PSTR("GET")) == 0) {
+    if (v0 == 'G' && strcmp_P(verb, PSTR("GET")) == 0) {
         uint8_t slot = kNoSlot;
         if (argc != 4 || !parseSlotArgs(argv + 1, &slot)) {
             sendError(port, PSTR("slot"), verb, kNoSlot);
@@ -368,7 +307,7 @@ bool Protocol::handleLine(const char *line, ReplyPort &port) {
         return sendSlotLine(slot, port);  // false: EEPROM busy, try again next pass
     }
 
-    if (strcmp_P(verb, PSTR("EVENTS")) == 0) {
+    if (v0 == 'E' && strcmp_P(verb, PSTR("EVENTS")) == 0) {
         if (argc != 2 || (strcmp(argv[1], "0") != 0 && strcmp(argv[1], "1") != 0)) {
             sendError(port, PSTR("args"), verb, kNoSlot);
             return true;
@@ -386,13 +325,13 @@ bool Protocol::handleLine(const char *line, ReplyPort &port) {
         return true;
     }
 
-    const bool isSet = strcmp_P(verb, PSTR("SET")) == 0;
-    const bool isRevert = strcmp_P(verb, PSTR("REVERT")) == 0;
-    const bool isSum = strcmp_P(verb, PSTR("SUM")) == 0;
-    const bool isDump = strcmp_P(verb, PSTR("DUMP")) == 0;
-    const bool isDefaults = strcmp_P(verb, PSTR("DEFAULTS")) == 0;
-    const bool isPrefix = strcmp_P(verb, PSTR("PREFIX")) == 0;
-    const bool isSuffix = strcmp_P(verb, PSTR("SUFFIX")) == 0;
+    const bool isSet = v0 == 'S' && strcmp_P(verb, PSTR("SET")) == 0;
+    const bool isRevert = v0 == 'R' && strcmp_P(verb, PSTR("REVERT")) == 0;
+    const bool isSum = v0 == 'S' && strcmp_P(verb, PSTR("SUM")) == 0;
+    const bool isDump = v0 == 'D' && strcmp_P(verb, PSTR("DUMP")) == 0;
+    const bool isDefaults = v0 == 'D' && strcmp_P(verb, PSTR("DEFAULTS")) == 0;
+    const bool isPrefix = v0 == 'P' && strcmp_P(verb, PSTR("PREFIX")) == 0;
+    const bool isSuffix = v0 == 'S' && strcmp_P(verb, PSTR("SUFFIX")) == 0;
     if (!(isSet || isRevert || isSum || isDump || isDefaults || isPrefix || isSuffix)) {
         sendError(port, PSTR("verb"), verb, kNoSlot);
         return true;
@@ -502,10 +441,10 @@ void Protocol::service() {
             Source src = Source::Default;
             if (!store_.keyForSlot(dumpNext_, key, &src))
                 return;  // EEPROM busy: next pass
-            char body[Protocol::kMaxLine + 1];
-            const uint8_t n = formatSlotBody(body, sizeof(body), dumpNext_, key, src);
-            for (uint8_t i = 0; i < n; ++i)
-                sumCrc_ = crc32Update(sumCrc_, static_cast<uint8_t>(body[i]));
+            Out body;
+            body.slot(dumpNext_);
+            slotRest(body, store_, dumpNext_, key, src);
+            sumCrc_ = crc32Block(sumCrc_, reinterpret_cast<const uint8_t *>(body.str()), body.len());
             sumCrc_ = crc32Update(sumCrc_, '\n');
             ++dumpNext_;
             return;
@@ -513,11 +452,7 @@ void Protocol::service() {
         if (!opPort_->canSend(kMaxLine))
             return;
         Out out;
-        const uint32_t crc = crc32Final(sumCrc_);
-        out.p(PSTR("@SM SUM "));
-        for (int8_t shift = 28; shift >= 0; shift -= 4)
-            out.c(kHexDigits[(crc >> shift) & 0x0F]);
-        out.p(PSTR(" slots=")).u(kSlotCount);
+        out.p(PSTR("@SM SUM ")).hex32(crc32Final(sumCrc_)).p(PSTR(" slots=")).u(kSlotCount);
         emit(out, *opPort_);
         op_ = Op::None;
         return;
@@ -595,37 +530,18 @@ bool Protocol::sendSlotLine(uint8_t slot, ReplyPort &port) {
     Source src = Source::Default;
     if (!store_.keyForSlot(slot, key, &src))
         return false;
-    char body[kMaxLine + 1];
-    formatSlotBody(body, sizeof(body), slot, key, src);
     Out out;
-    out.p(PSTR("@SM SLOT ")).s(body);
+    out.head(Out::Head::Slot, slot);
+    slotRest(out, store_, slot, key, src);
     emit(out, port);
     return true;
-}
-
-// "<slot> <key|-> <source> def=<default|->", or "<slot> - reserved res=<reason>".
-uint8_t Protocol::formatSlotBody(char *dst, uint8_t cap, uint8_t slot, const char *key, Source src) const {
-    Out out;
-    out.slot(slot).c(' ').key(key).c(' ').p(sourceToken(src));
-    const Reserved why = slotReserved(slot);
-    if (why != Reserved::No) {
-        out.p(PSTR(" res=")).p(reservedToken(why));
-    } else {
-        char def[kKeyBuf];
-        store_.defaultKey(slot, def);
-        out.p(PSTR(" def=")).key(def);
-    }
-    const uint8_t n = out.len() < cap ? out.len() : static_cast<uint8_t>(cap - 1);
-    memcpy(dst, out.str(), n);
-    dst[n] = '\0';
-    return n;
 }
 
 void Protocol::notifyPress(uint8_t slot, const char *key, Source src, bool modFromOther) {
     if (eventPort_ == nullptr || !eventPort_->canSend(kMaxLine))
         return;
     Out out;
-    out.p(PSTR("@SM PRESS ")).slot(slot).c(' ').key(key).c(' ').p(sourceToken(src));
+    out.head(Out::Head::Press, slot).c(' ').key(key).c(' ').p(sourceToken(src));
     if (modFromOther)
         out.p(PSTR(" from=")).c(slotCtrl(slot) == Ctrl::F ? 'D' : 'F');
     const Reserved why = slotReserved(slot);
@@ -670,7 +586,7 @@ bool Protocol::sendBattery(ReplyPort &port) {
     battStatusToken(out, battery_.footStatus);
     out.p(PSTR(" ds="));
     battStatusToken(out, battery_.domeStatus);
-    out.p(PSTR(" up=")).u(battery_.nowMs / 1000).p(PSTR(" hb=")).u(kBatteryPeriodMs / 1000);
+    out.p(PSTR(" up=")).uThousandths(battery_.nowMs).p(PSTR(" hb=")).u(kBatteryPeriodMs / 1000);
     emit(out, port);
     return true;
 }

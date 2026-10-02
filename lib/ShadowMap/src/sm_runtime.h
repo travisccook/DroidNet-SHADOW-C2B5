@@ -86,16 +86,28 @@ class Runtime {
         while (budget > 0) {
             if (reader.ready()) {
                 if (!protocol_.handleLine(reader.line(), replies)) {
-                    for (; budget > 0 && port.available() > 0; --budget)
-                        reader.discard(static_cast<char>(port.read()));
+                    while (budget > 0) {
+                        uint8_t n = batch(port.available(), budget);
+                        if (n == 0)
+                            return;
+                        budget = static_cast<uint8_t>(budget - n);
+                        for (; n > 0; --n)
+                            reader.discard(static_cast<char>(port.read()));
+                    }
                     return;
                 }
                 reader.consume();
             }
-            if (port.available() <= 0)
+            // As many bytes as are waiting (up to the budget), with one available() call: a line
+            // that completes stops the batch so it's handled before the next byte is read.
+            uint8_t n = batch(port.available(), budget);
+            if (n == 0)
                 return;
-            --budget;
-            reader.feed(static_cast<char>(port.read()));
+            for (; n > 0; --n) {
+                --budget;
+                if (reader.feed(static_cast<char>(port.read())))
+                    break;
+            }
         }
     }
 
@@ -134,6 +146,11 @@ class Runtime {
         uint32_t quietFrom = 0;     //   a second after its first press
     };
 
+    static uint8_t batch(int available, uint8_t budget) {
+        if (available <= 0)
+            return 0;
+        return available < budget ? static_cast<uint8_t>(available) : budget;
+    }
     bool handlePad(Ctrl ctrl, const PadState &self, const PadState &other, uint32_t nowMs, FiredPress *fired);
     bool settle(PadTaps &t, uint8_t slot, uint32_t nowMs, FiredPress *fired);
     bool pressed(PadTaps &t, uint8_t slot, bool fromOther, uint32_t nowMs, FiredPress *fired);
