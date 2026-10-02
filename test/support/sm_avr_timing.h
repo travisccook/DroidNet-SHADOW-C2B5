@@ -245,7 +245,9 @@ struct SerialPoke : HardwareSerial {
         volatile rx_buffer_index_t HardwareSerial::*tail = &SerialPoke::_rx_buffer_tail;
         s.*tail = s.*head;
     }
-    // Serial1's TX ring back to empty (UDRIE1 off), as if the UART had sent it all.
+    // Serial1's TX ring back to empty (UDRIE1 off), as if the UART had sent it all, and the UART
+    // idle (its data register free), so the next drain moves the most it can: 64 bytes, the first
+    // straight into UDR1.
     static void dropTx1() {
         volatile tx_buffer_index_t HardwareSerial::*head = &SerialPoke::_tx_buffer_head;
         volatile tx_buffer_index_t HardwareSerial::*tail = &SerialPoke::_tx_buffer_tail;
@@ -254,6 +256,8 @@ struct SerialPoke : HardwareSerial {
         UCSR1B = static_cast<uint8_t>(UCSR1B & ~_BV(UDRIE1));
         Serial1.*tail = Serial1.*head;
         SREG = sreg;
+        if (bit_is_set(UCSR1B, TXEN1))
+            loop_until_bit_is_set(UCSR1A, UDRE1);  // at most one byte time
     }
 };
 
@@ -265,6 +269,9 @@ class PacedEeprom final : public EepromIo {
   public:
     bool ready() override { return busy_ == 0 && eeprom_is_ready(); }
     uint8_t read(uint16_t addr) override { return eeprom_read_byte(reinterpret_cast<const uint8_t *>(addr)); }
+    void readBlock(uint16_t addr, uint8_t *dst, uint8_t n) override {
+        eeprom_read_block(dst, reinterpret_cast<const void *>(addr), n);
+    }
     void write(uint16_t addr, uint8_t value) override {
         eeprom_write_byte(reinterpret_cast<uint8_t *>(addr), corrupt ? static_cast<uint8_t>(value ^ 1) : value);
         busy_ = busyPasses;

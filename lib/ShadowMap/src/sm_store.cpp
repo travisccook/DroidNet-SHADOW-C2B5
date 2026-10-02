@@ -62,22 +62,12 @@ void copyField(uint8_t *dst, const char *src, uint8_t width) {
     memcpy(dst, src, n < width ? n : width - 1);
 }
 
-uint16_t headerCrc(const uint8_t *hdr) {
-    uint16_t crc = kCrc16Init;
-    for (uint8_t i = 0; i < kHdrCrc; ++i)
-        crc = crc16Update(crc, hdr[i]);
-    return crc;
-}
+uint16_t headerCrc(const uint8_t *hdr) { return crc16Block(kCrc16Init, hdr, kHdrCrc); }
 
 uint16_t slotCrc(uint8_t slot, uint16_t gen, const uint8_t *name) {
-    uint16_t crc = kCrc16Init;
-    crc = crc16Update(crc, MapStore::kLayoutVersion);
-    crc = crc16Update(crc, static_cast<uint8_t>(gen & 0xFF));
-    crc = crc16Update(crc, static_cast<uint8_t>(gen >> 8));
-    crc = crc16Update(crc, slot);
-    for (uint8_t i = 0; i < kKeyBuf; ++i)
-        crc = crc16Update(crc, name[i]);
-    return crc;
+    const uint8_t head[4] = {MapStore::kLayoutVersion, static_cast<uint8_t>(gen & 0xFF), static_cast<uint8_t>(gen >> 8),
+                             slot};
+    return crc16Block(crc16Block(kCrc16Init, head, sizeof(head)), name, kKeyBuf);
 }
 
 bool headerValid(const uint8_t *hdr) {
@@ -92,12 +82,27 @@ bool headerValid(const uint8_t *hdr) {
            isValidSuffix(reinterpret_cast<const char *>(hdr + kHdrSuffix));
 }
 
+// A record holds a key (0-15 key characters, then only NULs, at least one) and its CRC. The
+// checks run cheapest first: the first byte (a record the name check would refuse there, such
+// as an erased one), the CRC, then the whole name. The result is the same as checking all
+// three: fieldTerminated() && isValidKey() && the CRC.
 bool slotRecordValid(const uint8_t *rec, uint8_t slot, uint16_t gen) {
-    if (!fieldTerminated(rec, kKeyBuf))
+    if (rec[0] != 0 && !isKeyChar(static_cast<char>(rec[0])))
         return false;
-    if (!isValidKey(reinterpret_cast<const char *>(rec)))
+    if (get16(rec + kKeyBuf) != slotCrc(slot, gen, rec))
         return false;
-    return get16(rec + kKeyBuf) == slotCrc(slot, gen, rec);
+    uint8_t i = 0;
+    for (; i < kKeyBuf && rec[i] != 0; ++i) {
+        if (!isKeyChar(static_cast<char>(rec[i])))
+            return false;
+    }
+    if (i == kKeyBuf)
+        return false;  // 16 characters: no NUL
+    for (; i < kKeyBuf; ++i) {
+        if (rec[i] != 0)
+            return false;
+    }
+    return true;
 }
 
 }  // namespace
@@ -192,25 +197,26 @@ void MapStore::begin() {
 bool MapStore::doubleTapMapped(uint8_t slot) const {
     if (slot >= kSlotCount)
         return false;
-    const uint8_t i = static_cast<uint8_t>(slot % kSingleSlotCount);
-    return (doubleTaps_[i / 8] & (1u << (i % 8))) != 0;
+    const uint8_t i = splitSlot(slot).bank;
+    return (doubleTaps_[i >> 3] & (1u << (i & 7))) != 0;
 }
 
 bool MapStore::longPressMapped(uint8_t slot) const {
     if (slot >= kSlotCount)
         return false;
-    const uint8_t i = static_cast<uint8_t>(slot % kSingleSlotCount);
-    return (longPresses_[i / 8] & (1u << (i % 8))) != 0;
+    const uint8_t i = splitSlot(slot).bank;
+    return (longPresses_[i >> 3] & (1u << (i & 7))) != 0;
 }
 
 void MapStore::setTapMapped(uint8_t slot, bool mapped) {
-    uint8_t *bits = slotTap(slot) == Tap::LONG ? longPresses_ : doubleTaps_;
-    const uint8_t i = static_cast<uint8_t>(slot % kSingleSlotCount);
-    const uint8_t bit = static_cast<uint8_t>(1u << (i % 8));
+    const SlotParts p = splitSlot(slot);
+    uint8_t *bits = p.tap == static_cast<uint8_t>(Tap::LONG) ? longPresses_ : doubleTaps_;
+    const uint8_t i = p.bank;
+    const uint8_t bit = static_cast<uint8_t>(1u << (i & 7));
     if (mapped && slotReserved(slot) == Reserved::No)
-        bits[i / 8] = static_cast<uint8_t>(bits[i / 8] | bit);
+        bits[i >> 3] = static_cast<uint8_t>(bits[i >> 3] | bit);
     else
-        bits[i / 8] = static_cast<uint8_t>(bits[i / 8] & ~bit);
+        bits[i >> 3] = static_cast<uint8_t>(bits[i >> 3] & ~bit);
 }
 
 bool MapStore::defaultMapped(uint8_t slot) const {
@@ -219,16 +225,23 @@ bool MapStore::defaultMapped(uint8_t slot) const {
     return key[0] != '\0';
 }
 
+// Every double-tap and long-press bit from the defaults table: one pass over it, last entry
+// first, so where a slot is listed twice the first entry wins, as in defaultKey().
 void MapStore::loadTapDefaults() {
-    for (uint8_t slot = kSingleSlotCount; slot < kSlotCount; ++slot)
-        setTapMapped(slot, defaultMapped(slot));
+    memset(doubleTaps_, 0, sizeof(doubleTaps_));
+    memset(longPresses_, 0, sizeof(longPresses_));
+    const DefaultMapping *d = defaults_ + defaultCount_;
+    for (uint8_t n = defaultCount_; n != 0; --n) {
+        --d;
+        const uint8_t slot = pgm_read_byte(&d->slot);
+        if (slot >= kSingleSlotCount && slot < kSlotCount)
+            setTapMapped(slot, pgm_read_byte(&d->key[0]) != 0);
+    }
 }
 
 void MapStore::loadTap(uint8_t slot) {
     uint8_t rec[kSlotSize];
-    const uint16_t addr = slotAddr(slot);
-    for (uint8_t i = 0; i < kSlotSize; ++i)
-        rec[i] = io_.read(static_cast<uint16_t>(addr + i));
+    io_.readBlock(slotAddr(slot), rec, kSlotSize);
     setTapMapped(slot, slotRecordValid(rec, slot, gen_) ? rec[0] != 0 : defaultMapped(slot));
 }
 
@@ -243,14 +256,15 @@ void MapStore::applyHeader(const uint8_t *hdr, uint8_t index) {
 }
 
 void MapStore::defaultKey(uint8_t slot, char out[kKeyBuf]) const {
-    out[0] = '\0';
-    for (uint8_t i = 0; i < defaultCount_; ++i) {
-        if (pgm_read_byte(&defaults_[i].slot) == slot) {
-            memcpy_P(out, defaults_[i].key, kKeyBuf);
+    const DefaultMapping *d = defaults_;
+    for (uint8_t n = defaultCount_; n != 0; --n, ++d) {
+        if (pgm_read_byte(&d->slot) == slot) {
+            memcpy_P(out, d->key, kKeyBuf);
             out[kKeyMax] = '\0';
             return;
         }
     }
+    out[0] = '\0';
 }
 
 bool MapStore::readSlotRecord(uint8_t slot, uint8_t rec[kSlotSize]) {
@@ -258,9 +272,7 @@ bool MapStore::readSlotRecord(uint8_t slot, uint8_t rec[kSlotSize]) {
         readWanted_ = true;
         return false;
     }
-    const uint16_t addr = slotAddr(slot);
-    for (uint8_t i = 0; i < kSlotSize; ++i)
-        rec[i] = io_.read(static_cast<uint16_t>(addr + i));
+    io_.readBlock(slotAddr(slot), rec, kSlotSize);
     return true;
 }
 
@@ -435,9 +447,9 @@ void MapStore::step() {
         return;
     }
 
-    bool ok = true;
-    for (uint8_t i = 0; i < jobLen_ && ok; ++i)
-        ok = io_.read(static_cast<uint16_t>(jobAddr_ + i)) == jobData_[i];
+    uint8_t got[kHeaderSize];
+    io_.readBlock(jobAddr_, got, jobLen_);
+    const bool ok = memcmp(got, jobData_, jobLen_) == 0;
     if (!ok && retries_ < kMaxRetries) {
         ++retries_;
         jobPos_ = 0;

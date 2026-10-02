@@ -26,14 +26,48 @@ constexpr uint8_t slotIndex(Ctrl c, Mod m, Btn b, Tap t = Tap::SINGLE) {
                                 static_cast<uint8_t>(m) * kBtnCount + static_cast<uint8_t>(b));
 }
 
-inline Ctrl slotCtrl(uint8_t slot) { return static_cast<Ctrl>((slot % kSingleSlotCount) / kSlotsPerCtrl); }
-inline Mod slotMod(uint8_t slot) { return static_cast<Mod>((slot % kSlotsPerCtrl) / kBtnCount); }
-inline Btn slotBtn(uint8_t slot) { return static_cast<Btn>(slot % kBtnCount); }
-inline Tap slotTap(uint8_t slot) { return static_cast<Tap>(slot / kSingleSlotCount); }
+// A slot's parts, worked out by subtraction (an 8-bit divide is a library call on AVR). Any
+// value 0-255 gives what / and % would: tap = slot / 72 (3 for 216-255), bank = slot % 72.
+struct SlotParts {
+    uint8_t tap;   // 0 single, 1 double tap, 2 long press (3 past the last slot)
+    uint8_t bank;  // slot % 72: the single-press slot it belongs to
+    uint8_t ctrl;  // 0 foot, 1 dome
+    uint8_t mod;
+    uint8_t btn;
+};
+inline SlotParts splitSlot(uint8_t slot) {
+    SlotParts p;
+    uint8_t s = slot;
+    uint8_t t = 0;
+    while (s >= kSingleSlotCount) {
+        s = static_cast<uint8_t>(s - kSingleSlotCount);
+        ++t;
+    }
+    p.tap = t;
+    p.bank = s;
+    p.ctrl = 0;
+    if (s >= kSlotsPerCtrl) {
+        s = static_cast<uint8_t>(s - kSlotsPerCtrl);
+        p.ctrl = 1;
+    }
+    uint8_t m = 0;
+    while (s >= kBtnCount) {
+        s = static_cast<uint8_t>(s - kBtnCount);
+        ++m;
+    }
+    p.mod = m;
+    p.btn = s;
+    return p;
+}
+
+inline Ctrl slotCtrl(uint8_t slot) { return static_cast<Ctrl>(splitSlot(slot).ctrl); }
+inline Mod slotMod(uint8_t slot) { return static_cast<Mod>(splitSlot(slot).mod); }
+inline Btn slotBtn(uint8_t slot) { return static_cast<Btn>(splitSlot(slot).btn); }
+inline Tap slotTap(uint8_t slot) { return static_cast<Tap>(splitSlot(slot).tap); }
 // The double-tap slot for a single-press slot.
-inline uint8_t doubleOf(uint8_t slot) { return static_cast<uint8_t>(slot % kSingleSlotCount + kSingleSlotCount); }
+inline uint8_t doubleOf(uint8_t slot) { return static_cast<uint8_t>(splitSlot(slot).bank + kSingleSlotCount); }
 // The long-press slot for a single-press slot.
-inline uint8_t longOf(uint8_t slot) { return static_cast<uint8_t>(slot % kSingleSlotCount + 2 * kSingleSlotCount); }
+inline uint8_t longOf(uint8_t slot) { return static_cast<uint8_t>(splitSlot(slot).bank + 2 * kSingleSlotCount); }
 
 // Why a slot can't be mapped. These combos are hardcoded in main.cpp or never reach the
 // mapping, so SET rejects them and lookups return nothing.
@@ -58,6 +92,13 @@ bool parseBtn(const char *s, Btn *out, Tap *tap = nullptr);
 uint8_t formatSlot(char *dst, uint8_t cap, uint8_t slot);
 
 constexpr uint8_t kSlotTextBuf = 16;
+
+// The length of a slot's text (0 for a slot past the last), and the text itself without a NUL
+// (`slot` must be a slot; returns the length). For lines built in place (Out::slot).
+uint8_t slotTextLen(uint8_t slot);
+uint8_t writeSlotText(char *dst, uint8_t slot);
+// The length of a modifier's token ("NONE" 4 ... "CIRCLE" 6).
+uint8_t modTextLen(uint8_t mod);
 
 // Flash strings for a reserved reason ("psgate", "overspeed", "stick"), or nullptr for Reserved::No.
 const char *reservedToken(Reserved r);
