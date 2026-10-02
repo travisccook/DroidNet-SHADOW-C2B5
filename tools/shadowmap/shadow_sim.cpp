@@ -16,9 +16,16 @@
 //   !!BATT <foot> <dome>  the controllers' battery status bytes from now on (hex, 0 = none)
 //   !!CUT <writes>        power fails after that many more EEPROM byte writes
 //   !!REBOOT              restart SHADOW (EEPROM survives, RAM doesn't)
+//   !!QUEUE <text>        <text> and '\r' arrive on Serial1 with no passes run yet, so the next
+//                         control runs with it pending (a request landing during a press)
 //
-// After each input line the simulator runs loop passes until SHADOW has nothing left to do,
-// then prints "!!IDLE <ms>".
+// After each input line (but !!QUEUE) the simulator runs loop passes until SHADOW has nothing
+// left to do, then prints "!!IDLE <ms>".
+//
+// A second argument, a number, makes serial input arrive that many bytes per pass (2 is about
+// 9600 baud) into a 64-byte receive buffer like HardwareSerial's, which drops bytes once it
+// holds 63; "!!IDLE <ms> dropped=<n>" then counts any it dropped. Without it every byte is
+// there at once.
 //
 // Build (from the repo root; test_shadowmap.py does this for you):
 //   g++ -std=gnu++17 -I lib/ShadowMap/src -I include tools/shadowmap/shadow_sim.cpp
@@ -100,8 +107,33 @@ struct StdoutUart {
 struct InputQueue {
     std::string bytes;
     size_t pos = 0;
-    int available() { return pos < bytes.size() ? 1 : 0; }
-    int read() { return pos < bytes.size() ? static_cast<unsigned char>(bytes[pos++]) : -1; }
+    // Paced mode (perPass > 0): bytes[pos, arrived) are in the receive buffer, the rest still on
+    // the wire.
+    int perPass = 0;
+    size_t arrived = 0;
+    unsigned long dropped = 0;
+    void arrive() {
+        if (perPass <= 0)
+            return;
+        for (int i = 0; i < perPass && arrived < bytes.size(); ++i) {
+            if (arrived - pos >= 63) {  // HardwareSerial's ring is full: the byte is lost
+                bytes.erase(arrived, 1);
+                ++dropped;
+            } else {
+                ++arrived;
+            }
+        }
+    }
+    int available() {
+        if (perPass > 0)
+            return static_cast<int>(arrived - pos);
+        return pos < bytes.size() ? 1 : 0;
+    }
+    int read() {
+        if (perPass > 0 && pos >= arrived)
+            return -1;
+        return pos < bytes.size() ? static_cast<unsigned char>(bytes[pos++]) : -1;
+    }
     bool empty() const { return pos >= bytes.size(); }
 };
 
@@ -126,6 +158,7 @@ struct Shadow {
 };
 
 void pass(Shadow &s, FileEeprom &eeprom, StdoutUart &uart, InputQueue &in, sm::PadState foot, sm::PadState dome) {
+    in.arrive();
     s.runtime.pump(in, s.reader, s.port);
     sm::FiredPress fired;
     s.runtime.buttons(now, foot, dome, &fired);
@@ -149,6 +182,8 @@ int main(int argc, char **argv) {
     FileEeprom eeprom(eepromPath);
     StdoutUart uart;
     InputQueue in;
+    const int perPass = argc > 2 ? atoi(argv[2]) : 0;
+    in.perPass = perPass;
     auto shadow = std::make_unique<Shadow>(eeprom);
     sm::PadState foot = {true, 0};
     sm::PadState dome = {true, 0};
@@ -191,8 +226,15 @@ int main(int argc, char **argv) {
             } else if (line == "!!REBOOT") {
                 eeprom.powerOn();
                 shadow = std::make_unique<Shadow>(eeprom);
+                const unsigned long dropped = in.dropped;
                 in = InputQueue();
+                in.perPass = perPass;
+                in.dropped = dropped;
                 uart.room = 63;
+            } else if (line.rfind("!!QUEUE ", 0) == 0) {
+                in.bytes.append(line, 8, std::string::npos);
+                in.bytes.push_back('\r');
+                continue;  // no passes: the next line runs with it pending
             } else {
                 fprintf(stderr, "unknown control: %s\n", line.c_str());
                 return 2;
@@ -204,7 +246,10 @@ int main(int argc, char **argv) {
 
         for (int i = 0; i < 20000 && busy(*shadow, in, uart); ++i)
             pass(*shadow, eeprom, uart, in, foot, dome);
-        printf("!!IDLE %u\n", static_cast<unsigned>(now));
+        if (in.dropped != 0)
+            printf("!!IDLE %u dropped=%lu\n", static_cast<unsigned>(now), in.dropped);
+        else
+            printf("!!IDLE %u\n", static_cast<unsigned>(now));
         fflush(stdout);
     }
     return 0;

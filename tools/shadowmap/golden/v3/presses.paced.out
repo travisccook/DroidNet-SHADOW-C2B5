@@ -1,0 +1,130 @@
+;S0@SM READY v3 fw=sim slots=216 gen=0 fmt=0 pads=FD *BE5C0949
+!!IDLE 82
+;S0@SM OK EVENTS 1 *72286E5B
+!!IDLE 134
+;W1;Chappysound
+;S0@SM PRESS F NONE UP happysound default *A0BFE96B
+@WDP1 {"type":"Shadow","fw":"sim"}
+!!IDLE 1239
+;W1;Cextremehappysou
+;S0@SM PRESS F L1 UP extremehappysou default *D78BC365
+!!IDLE 2316
+;W1;Cextremesadsound
+;S0@SM PRESS F L1 RIGHT extremesadsound default *699A2935
+!!IDLE 3397
+;W1;Cmahna
+;S0@SM PRESS F L2 PS mahna default *6DA42067
+!!IDLE 4454
+!!IDLE 5457
+;S0@SM PRESS F L1 L3 - reserved res=overspeed *7C23CD38
+;S0@SM BAT F=- D=- fs=- ds=- up=6 hb=30 *269A7160
+!!IDLE 6564
+;W1;Clove
+;S0@SM PRESS F CIRCLE RIGHT love default *37D6FBC9
+!!IDLE 7627
+;W1;Clove
+;S0@SM PRESS F CIRCLE RIGHT love default from=D *7AE4B278
+!!IDLE 8696
+;S0@SM PRESS D CIRCLE RIGHT - default from=F *D9C05A5F
+!!IDLE 9753
+;W1;Cfrontholocenter
+;S0@SM PRESS D L1 L3 frontholocenter default *91F5C978
+!!IDLE 10830
+;W1;CGDrecruitsong
+;S0@SM PRESS D CROSS DOWN GDrecruitsong default *4E90836B
+!!IDLE 11909
+;W1;CGDrecruitsong
+;S0@SM PRESS D CROSS DOWN GDrecruitsong default from=F *622BDC40
+!!IDLE 12994
+!!IDLE 13997
+;W1;Csinglemuse
+;S0@SM PRESS D NONE UP singlemuse default *5095805B
+!!IDLE 15066
+;W1;CGDcollar
+;S0@SM PRESS D L2 LEFT GDcollar default *513B0BC4
+!!IDLE 16131
+;W1;Cresetsilent
+;S0@SM PRESS D NONE DOWN resetsilent default *306C5349
+!!IDLE 17204
+;S0@SM PRESS F NONE L3 - default *CF99D74F
+!!IDLE 18249
+;S0@SM OK SET F NONE UP2 dbl *BED9D713
+!!IDLE 18529
+;S0@SM OK SET F NONE UPL lng *CD4F4E81
+!!IDLE 18677
+;S0@SM OK SET D CIRCLE RIGHT2 zyxwvutsrqponml *547E8868
+!!IDLE 18857
+;S0@SM OK SET F CIRCLE RIGHTL zyxwvutsrqponml *6C216F2F
+!!IDLE 19037
+!!IDLE 19077
+!!IDLE 19137
+;W1;Cdbl
+;S0@SM PRESS F NONE UP2 dbl eeprom *966F2CB7
+!!IDLE 19191
+!!IDLE 20291
+;W1;Clng
+;S0@SM PRESS F NONE UPL lng eeprom *F39DD1EB
+!!IDLE 20991
+!!IDLE 22091
+!!IDLE 22491
+;W1;Chappysound
+;S0@SM PRESS F NONE UP happysound default *A0BFE96B
+!!IDLE 23591
+!!IDLE 23631
+;W1;Chappysound
+;S0@SM PRESS F NONE UP happysound default *A0BFE96B
+!!IDLE 24731
+!!IDLE 24771
+!!IDLE 24831
+;W1;Czyxwvutsrqponml
+;S0@SM PRESS D CIRCLE RIGHT2 zyxwvutsrqponml eeprom from=F *A078563D
+!!IDLE 24921
+!!IDLE 26021
+;W1;Czyxwvutsrqponml
+;S0@SM PRESS F CIRCLE RIGHTL zyxwvutsrqponml eeprom from=D *65AEFC15
+!!IDLE 26721
+@WDP1 {"type":"Shadow","fw":"sim"}
+!!IDLE 27821
+!!IDLE 27861
+!!IDLE 27921
+;W1;Cdbl
+;S0@SM PRESS F NONE UP2 dbl eeprom *966F2CB7
+!!IDLE 27975
+!!IDLE 28035
+!!IDLE 28075
+!!IDLE 29175
+;W1;Cangrysound
+;S0@SM PRESS F NONE DOWN angrysound default *312F3865
+;W1;Cangrysound
+;S0@SM PRESS F NONE DOWN angrysound default *312F3865
+;W1;Cangrysound
+;S0@SM PRESS F NONE DOWN angrysound default *312F3865
+!!IDLE 31775
+!!IDLE 32875
+;W1;Cimperialmarch
+;S0@SM PRESS F L2 UP imperialmarch default *F3F5878E
+;W1;Cimperialmarch
+;S0@SM PRESS F L2 UP imperialmarch default *F3F5878E
+;W1;Cimperialmarch
+;S0@SM PRESS F L2 UP imperialmarch default *F3F5878E
+!!IDLE 35475
+;S0@SM BAT F=- D=- fs=- ds=- up=36 hb=30 *EEC77205
+!!IDLE 36575
+;S0@SM CTL F 0 *21C0C941
+!!IDLE 37602
+;S0@SM CTL F 1 *56C7F9D7
+;S0@SM CTL D 0 *22441D2F
+!!IDLE 38653
+;W1;Cextremehappysou
+;S0@SM PRESS F L1 UP extremehappysou default *D78BC365
+!!IDLE 39730
+;S0@SM OK EVENTS 0 *052F5ECD
+!!IDLE 39782
+;W1;Chappysound
+!!IDLE 41149
+;S0@SM OK EVENTS 1 *72286E5B
+!!IDLE 41201
+;W1;Chappysound
+;S0@SM PRESS F NONE UP happysound default *A0BFE96B
+!!IDLE 42620
+!!IDLE 44620
