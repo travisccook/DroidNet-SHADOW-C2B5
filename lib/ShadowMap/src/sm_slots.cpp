@@ -9,17 +9,18 @@ namespace {
 const char kCtrlTokens[kCtrlCount][2] PROGMEM = {"F", "D"};
 const char kModTokens[kModCount][7] PROGMEM = {"NONE", "L1", "L2", "PS", "CIRCLE", "CROSS"};
 const char kBtnTokens[kBtnCount][6] PROGMEM = {"UP", "RIGHT", "DOWN", "LEFT", "L3", "PS"};
+const uint8_t kModLen[kModCount] PROGMEM = {4, 2, 2, 2, 6, 5};
+const uint8_t kBtnLen[kBtnCount] PROGMEM = {2, 5, 4, 4, 2, 2};
 const char kReservedPsGate[] PROGMEM = "psgate";
 const char kReservedOverSpeed[] PROGMEM = "overspeed";
 const char kReservedStick[] PROGMEM = "stick";
-const char kSpace[] PROGMEM = " ";
-const char kDoubleMark[] PROGMEM = "2";
-const char kLongMark[] PROGMEM = "L";
 
+// The token `s` spells, if any. Only a token with the same first character is compared in full.
 template <uint8_t N, uint8_t W>
 bool parseToken(const char *s, const char (&tokens)[N][W], uint8_t *out) {
+    const char first = s[0];
     for (uint8_t i = 0; i < N; ++i) {
-        if (strcmp_P(s, tokens[i]) == 0) {
+        if (static_cast<char>(pgm_read_byte(&tokens[i][0])) == first && strcmp_P(s, tokens[i]) == 0) {
             *out = i;
             return true;
         }
@@ -27,15 +28,8 @@ bool parseToken(const char *s, const char (&tokens)[N][W], uint8_t *out) {
     return false;
 }
 
-// Appends a flash string; returns false if it doesn't fit (leaving room for the NUL).
-bool appendP(char *dst, uint8_t cap, uint8_t *len, PGM_P src) {
-    const size_t n = strlen_P(src);
-    if (*len + n + 1 > cap)
-        return false;
-    memcpy_P(dst + *len, src, n);
-    *len = static_cast<uint8_t>(*len + n);
-    dst[*len] = '\0';
-    return true;
+uint8_t textLen(const SlotParts &p) {
+    return static_cast<uint8_t>(3 + pgm_read_byte(&kModLen[p.mod]) + pgm_read_byte(&kBtnLen[p.btn]) + (p.tap != 0 ? 1 : 0));
 }
 
 }  // namespace
@@ -43,12 +37,14 @@ bool appendP(char *dst, uint8_t cap, uint8_t *len, PGM_P src) {
 Reserved slotReserved(uint8_t slot) {
     if (slot >= kSlotCount)
         return Reserved::No;
-    const Mod m = slotMod(slot);
-    if (slotBtn(slot) == Btn::PS && m != Mod::L1 && m != Mod::L2)
+    const SlotParts p = splitSlot(slot);
+    const Mod m = static_cast<Mod>(p.mod);
+    const Btn b = static_cast<Btn>(p.btn);
+    if (b == Btn::PS && m != Mod::L1 && m != Mod::L2)
         return Reserved::PsGate;
-    if (slotCtrl(slot) == Ctrl::F && m == Mod::L1 && slotBtn(slot) == Btn::L3)
+    if (p.ctrl == static_cast<uint8_t>(Ctrl::F) && m == Mod::L1 && b == Btn::L3)
         return Reserved::OverSpeed;
-    if (slotTap(slot) != Tap::SINGLE && slotBtn(slot) == Btn::L3)
+    if (p.tap != static_cast<uint8_t>(Tap::SINGLE) && b == Btn::L3)
         return Reserved::Stick;
     return Reserved::No;
 }
@@ -71,19 +67,21 @@ bool parseMod(const char *s, Mod *out) {
 
 bool parseBtn(const char *s, Btn *out, Tap *tap) {
     uint8_t i = 0;
-    if (parseToken(s, kBtnTokens, &i)) {
+    const size_t n = strlen(s);
+    const char mark = n > 0 ? s[n - 1] : '\0';
+    if (mark != '2' && mark != 'L') {
+        // No button token ends in '2' or 'L' (UP RIGHT DOWN LEFT L3 PS), so only an unmarked one
+        // can be a plain button.
+        if (!parseToken(s, kBtnTokens, &i))
+            return false;
         *out = static_cast<Btn>(i);
         if (tap != nullptr)
             *tap = Tap::SINGLE;
         return true;
     }
     // "UP2" / "UPL": a button token and the double-tap or long-press mark.
-    const size_t n = strlen(s);
     char base[sizeof(kBtnTokens[0])];
     if (tap == nullptr || n < 2 || n > sizeof(base))
-        return false;
-    const char mark = s[n - 1];
-    if (mark != '2' && mark != 'L')
         return false;
     memcpy(base, s, n - 1);
     base[n - 1] = '\0';
@@ -94,22 +92,34 @@ bool parseBtn(const char *s, Btn *out, Tap *tap) {
     return true;
 }
 
+uint8_t slotTextLen(uint8_t slot) { return slot < kSlotCount ? textLen(splitSlot(slot)) : 0; }
+
+uint8_t modTextLen(uint8_t mod) { return pgm_read_byte(&kModLen[mod]); }
+
+uint8_t writeSlotText(char *dst, uint8_t slot) {
+    const SlotParts p = splitSlot(slot);
+    const uint8_t ml = pgm_read_byte(&kModLen[p.mod]);
+    const uint8_t bl = pgm_read_byte(&kBtnLen[p.btn]);
+    dst[0] = p.ctrl != 0 ? 'D' : 'F';
+    dst[1] = ' ';
+    memcpy_P(dst + 2, kModTokens[p.mod], ml);
+    dst[2 + ml] = ' ';
+    memcpy_P(dst + 3 + ml, kBtnTokens[p.btn], bl);
+    uint8_t len = static_cast<uint8_t>(3 + ml + bl);
+    if (p.tap != 0)
+        dst[len++] = p.tap == static_cast<uint8_t>(Tap::DOUBLE) ? '2' : 'L';
+    return len;
+}
+
 uint8_t formatSlot(char *dst, uint8_t cap, uint8_t slot) {
     if (slot >= kSlotCount || cap == 0)
         return 0;
-    uint8_t len = 0;
-    dst[0] = '\0';
-    const bool ok = appendP(dst, cap, &len, kCtrlTokens[static_cast<uint8_t>(slotCtrl(slot))]) &&
-                    appendP(dst, cap, &len, kSpace) &&
-                    appendP(dst, cap, &len, kModTokens[static_cast<uint8_t>(slotMod(slot))]) &&
-                    appendP(dst, cap, &len, kSpace) &&
-                    appendP(dst, cap, &len, kBtnTokens[static_cast<uint8_t>(slotBtn(slot))]) &&
-                    (slotTap(slot) == Tap::SINGLE ||
-                     appendP(dst, cap, &len, slotTap(slot) == Tap::DOUBLE ? kDoubleMark : kLongMark));
-    if (!ok) {
+    if (slotTextLen(slot) >= cap) {  // the text and its NUL must fit
         dst[0] = '\0';
         return 0;
     }
+    const uint8_t len = writeSlotText(dst, slot);
+    dst[len] = '\0';
     return len;
 }
 
