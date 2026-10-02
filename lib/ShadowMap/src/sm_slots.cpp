@@ -37,7 +37,10 @@ uint8_t textLen(const SlotParts &p) {
 Reserved slotReserved(uint8_t slot) {
     if (slot >= kSlotCount)
         return Reserved::No;
-    const SlotParts p = splitSlot(slot);
+    return slotReserved(splitSlot(slot));
+}
+
+Reserved slotReserved(const SlotParts &p) {
     const Mod m = static_cast<Mod>(p.mod);
     const Btn b = static_cast<Btn>(p.btn);
     if (b == Btn::PS && m != Mod::L1 && m != Mod::L2)
@@ -94,10 +97,11 @@ bool parseBtn(const char *s, Btn *out, Tap *tap) {
 
 uint8_t slotTextLen(uint8_t slot) { return slot < kSlotCount ? textLen(splitSlot(slot)) : 0; }
 
+uint8_t slotTextLen(const SlotParts &p) { return textLen(p); }
+
 uint8_t modTextLen(uint8_t mod) { return pgm_read_byte(&kModLen[mod]); }
 
-uint8_t writeSlotText(char *dst, uint8_t slot) {
-    const SlotParts p = splitSlot(slot);
+uint8_t writeSlotText(char *dst, const SlotParts &p) {
     const uint8_t ml = pgm_read_byte(&kModLen[p.mod]);
     const uint8_t bl = pgm_read_byte(&kBtnLen[p.btn]);
     dst[0] = p.ctrl != 0 ? 'D' : 'F';
@@ -110,6 +114,8 @@ uint8_t writeSlotText(char *dst, uint8_t slot) {
         dst[len++] = p.tap == static_cast<uint8_t>(Tap::DOUBLE) ? '2' : 'L';
     return len;
 }
+
+uint8_t writeSlotText(char *dst, uint8_t slot) { return writeSlotText(dst, splitSlot(slot)); }
 
 uint8_t formatSlot(char *dst, uint8_t cap, uint8_t slot) {
     if (slot >= kSlotCount || cap == 0)

@@ -86,7 +86,26 @@ Out &Out::s(const char *src) {
 
 Out &Out::u(uint32_t v) {
     char tmp[10];
-    const uint8_t n = digits(v, tmp);
+    uint8_t n;
+    if (v <= 0xFFFF) {
+        // Most numbers here are 16-bit (the protocol version, slot count, generation): 16-bit
+        // subtractions from 10000 down.
+        uint16_t w = static_cast<uint16_t>(v);
+        n = 0;
+        for (uint8_t i = 5; i < 9; ++i) {  // 10^4 down to 10
+            const uint16_t p = static_cast<uint16_t>(pgm_read_dword(&kPow10[i]));
+            uint8_t d = 0;
+            while (w >= p) {
+                w = static_cast<uint16_t>(w - p);
+                ++d;
+            }
+            if (d != 0 || n != 0)
+                tmp[n++] = static_cast<char>('0' + d);
+        }
+        tmp[n++] = static_cast<char>('0' + static_cast<uint8_t>(w));
+    } else {
+        n = digits(v, tmp);
+    }
     if (reserve(n)) {
         memcpy(buf_ + len_, tmp, n);
         advance(n);
@@ -140,9 +159,12 @@ Out &Out::hex(const char *src) {
 Out &Out::hex32(uint32_t v) {
     if (!reserve(8))
         return *this;
+    // The bytes by constant shifts (a variable 32-bit shift is a bit-at-a-time loop on AVR).
+    const uint8_t bytes[4] = {static_cast<uint8_t>(v >> 24), static_cast<uint8_t>(v >> 16), static_cast<uint8_t>(v >> 8),
+                              static_cast<uint8_t>(v)};
     char *d = buf_ + len_;
-    for (int8_t shift = 24; shift >= 0; shift -= 8) {
-        const uint8_t b = static_cast<uint8_t>(v >> shift);
+    for (uint8_t i = 0; i < 4; ++i) {
+        const uint8_t b = bytes[i];
         *d++ = hexDigit(hiNibble(b));
         *d++ = hexDigit(static_cast<uint8_t>(b & 0x0F));
     }
@@ -166,10 +188,18 @@ Out &Out::slot(uint8_t slot) {
 Out &Out::head(Head head, uint8_t slot) {
     const bool empty = len_ == 0;  // the states are for a line that starts here
     p(head == Head::Press ? kPressHead : kSlotHead);
+    if (slot >= kSlotCount) {
+        overflow_ = true;  // not a slot
+        return *this;
+    }
+    const SlotParts parts = splitSlot(slot);
+    const uint8_t n = slotTextLen(parts);
+    if (!reserve(n))
+        return *this;
     const uint8_t at = len_;
-    this->slot(slot);
-    if (!overflow_ && empty) {
-        const SlotParts parts = splitSlot(slot);
+    writeSlotText(buf_ + at, parts);
+    advance(n);
+    if (empty) {
         crc_ = pgm_read_dword(&kHeadStates[head == Head::Press ? 1 : 0][parts.ctrl * kModCount + parts.mod]);
         crcFrom_ = static_cast<uint8_t>(at + 3 + modTextLen(parts.mod));
     }
