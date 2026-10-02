@@ -90,6 +90,7 @@
 #include "../lib/Sabertooth/Sabertooth.h"
 #include "../include/config.h"
 #include "../include/default_mappings.h"
+#include "../include/sm_uart_avr.h"
 #include <ShadowMap.h>
 
 // ---------------------------------------------------------------------------------------
@@ -194,6 +195,9 @@ sm::WcbPort wcbReplies(wcbTx);
 sm::Protocol mapProtocol(mapStore, SHADOW_FW_VERSION);
 sm::LineReader wcbLines;
 sm::LineReader usbLines;
+// Serial1 as the mapping's per-pass work reaches it (include/sm_uart_avr.h): HardwareSerial's own
+// buffers without a virtual call per byte. setup()'s direct Serial1 prints are unchanged.
+sm::Uart1 wcbUart;
 
 // Replies to "@SM" requests typed on the USB port go out with the debug output. A reply waits
 // until `output` is nearly empty, so printOutput()'s write stays short (the UART buffer holds
@@ -312,7 +316,7 @@ void watchBatteries() {
 // SHADOW doesn't announce itself to the WCB while a controller fault is active.
 void serviceMapping(bool faulted) {
     watchBatteries();
-    mapRuntime.service(millis(), Serial1, !faulted);
+    mapRuntime.service(millis(), wcbUart, !faulted);
 }
 
 // =======================================================================================
@@ -1403,7 +1407,7 @@ void loop() {
     // LOOP through functions from highest to lowest priority.
 
     // Mapping edits from DroidNet (via the WCB) or the USB port. Never blocks.
-    mapRuntime.pump(Serial1, wcbLines, wcbReplies);
+    mapRuntime.pump(wcbUart, wcbLines, wcbReplies);
     mapRuntime.pump(Serial, usbLines, usbReplies);
 
     if (!readUSB()) {

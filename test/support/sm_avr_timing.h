@@ -256,8 +256,20 @@ struct SerialPoke : HardwareSerial {
         UCSR1B = static_cast<uint8_t>(UCSR1B & ~_BV(UDRIE1));
         Serial1.*tail = Serial1.*head;
         SREG = sreg;
-        if (bit_is_set(UCSR1B, TXEN1))
+        if (bit_is_set(UCSR1B, TXEN1)) {
             loop_until_bit_is_set(UCSR1A, UDRE1);  // at most one byte time
+            // simavr prints what a UART sends a line at a time; tool-simavr 1.10800.0 writes a NUL
+            // one byte past its 256-byte line buffer whenever 256 bytes arrive without a '\n'
+            // (avr_uart.c, since fixed upstream), and the firmware ends its lines with '\r'. The
+            // corrupted heap can crash simavr as it exits, losing the run's output. A few bytes go
+            // out a pass, so a '\n' every 32 passes keeps well clear.
+            static uint8_t passes = 0;
+            if (++passes >= 32) {
+                passes = 0;
+                UDR1 = '\n';
+                loop_until_bit_is_set(UCSR1A, UDRE1);
+            }
+        }
     }
 };
 
