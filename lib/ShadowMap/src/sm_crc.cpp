@@ -4,7 +4,7 @@
 
 namespace sm {
 
-namespace {
+namespace detail {
 
 // Byte-at-a-time tables split into byte planes, each 256-aligned in flash, so a lookup is
 // "high byte = the plane's page, low byte = the index": no multiply, no 16-bit add. The compiler
@@ -50,7 +50,10 @@ alignas(256) const uint8_t kCrc16Planes[2][256] PROGMEM = {
 #undef SM_C16HI
 #undef SM_C16LO
 
-}  // namespace
+}  // namespace detail
+
+using detail::kCrc16Planes;
+using detail::kCrc32Planes;
 
 uint16_t crc16Update(uint16_t crc, uint8_t byte) {
     const uint8_t i = static_cast<uint8_t>((crc >> 8) ^ byte);
@@ -67,6 +70,84 @@ uint32_t crc32Update(uint32_t crc, uint8_t byte) {
     return (crc >> 8) ^ t;
 }
 
+#if defined(__AVR__)
+
+// The block loops in assembly: a lookup is one LPM per plane, the plane's page in r31 and the
+// index in r30. The data pointer is in X; only r30/r31 are clobbered. The tables must sit in the
+// first 64 KB of flash (LPM, not ELPM): PROGMEM data is placed right after the vectors, and
+// test_avr_crc_asm checks the planes' addresses.
+
+// 15 cycles a byte.
+uint16_t crc16Block(uint16_t crc, const uint8_t *data, uint8_t n) {
+    if (n == 0)
+        return crc;
+    uint8_t lo = static_cast<uint8_t>(crc);
+    uint8_t hi = static_cast<uint8_t>(crc >> 8);
+    const uint8_t page = static_cast<uint8_t>(reinterpret_cast<uint16_t>(&kCrc16Planes[0][0]) >> 8);
+    __asm__ volatile(
+        "1:                  \n\t"
+        "ld   r30, %a[p]+    \n\t"  // index = high byte ^ data
+        "eor  r30, %[hi]     \n\t"
+        "mov  r31, %[pg]     \n\t"
+        "lpm  %[hi], Z       \n\t"  // high = table high byte ^ low byte
+        "eor  %[hi], %[lo]   \n\t"
+        "inc  r31            \n\t"
+        "lpm  %[lo], Z       \n\t"  // low = table low byte
+        "dec  %[n]           \n\t"
+        "brne 1b             \n\t"
+        : [lo] "+r"(lo), [hi] "+r"(hi), [p] "+x"(data), [n] "+r"(n)
+        : [pg] "r"(page)
+        : "r30", "r31", "memory");
+    return static_cast<uint16_t>(static_cast<uint16_t>(static_cast<uint16_t>(hi) << 8) | lo);
+}
+
+// One table step: index = low byte ^ data; c0 = t0 ^ c1, c1 = t1 ^ c2, c2 = t2 ^ c3, c3 = t3.
+#define SM_CRC32_STEP                \
+    "ld   r30, %a[p]+    \n\t"       \
+    "eor  r30, %[c0]     \n\t"       \
+    "mov  r31, %[pg]     \n\t"       \
+    "lpm  %[c0], Z       \n\t"       \
+    "inc  r31            \n\t"       \
+    "eor  %[c0], %[c1]   \n\t"       \
+    "lpm  %[c1], Z       \n\t"       \
+    "inc  r31            \n\t"       \
+    "eor  %[c1], %[c2]   \n\t"       \
+    "lpm  %[c2], Z       \n\t"       \
+    "inc  r31            \n\t"       \
+    "eor  %[c2], %[c3]   \n\t"       \
+    "lpm  %[c3], Z       \n\t"
+
+// 23.5 cycles a byte: two bytes a loop, an odd byte first.
+uint32_t crc32Block(uint32_t crc, const uint8_t *data, uint8_t n) {
+    if (n == 0)
+        return crc;
+    uint8_t c0 = static_cast<uint8_t>(crc);
+    uint8_t c1 = static_cast<uint8_t>(crc >> 8);
+    uint8_t c2 = static_cast<uint8_t>(crc >> 16);
+    uint8_t c3 = static_cast<uint8_t>(crc >> 24);
+    const uint8_t page = static_cast<uint8_t>(reinterpret_cast<uint16_t>(&kCrc32Planes[0][0]) >> 8);
+    __asm__ volatile(
+        "    sbrs %[n], 0         \n\t"  // an odd count: one byte first
+        "    rjmp 2f              \n\t"
+        SM_CRC32_STEP
+        "2:  lsr  %[n]            \n\t"  // then pairs
+        "    breq 3f              \n\t"
+        "1:                       \n\t"
+        SM_CRC32_STEP
+        SM_CRC32_STEP
+        "    dec  %[n]            \n\t"
+        "    brne 1b              \n\t"
+        "3:                       \n\t"
+        : [c0] "+r"(c0), [c1] "+r"(c1), [c2] "+r"(c2), [c3] "+r"(c3), [p] "+x"(data), [n] "+r"(n)
+        : [pg] "r"(page)
+        : "r30", "r31", "memory");
+    return static_cast<uint32_t>(c0) | (static_cast<uint32_t>(c1) << 8) | (static_cast<uint32_t>(c2) << 16) |
+           (static_cast<uint32_t>(c3) << 24);
+}
+#undef SM_CRC32_STEP
+
+#else
+
 uint16_t crc16Block(uint16_t crc, const uint8_t *data, uint8_t n) {
     for (; n != 0; --n)
         crc = crc16Update(crc, *data++);
@@ -78,6 +159,8 @@ uint32_t crc32Block(uint32_t crc, const uint8_t *data, uint8_t n) {
         crc = crc32Update(crc, *data++);
     return crc;
 }
+
+#endif
 
 uint32_t crc32(const uint8_t *data, size_t len) {
     uint32_t crc = kCrc32Init;
