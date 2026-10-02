@@ -457,7 +457,10 @@ The library has no Arduino dependency, so it builds and tests on the host.
     port. A request that can't be answered yet keeps the old rule: bytes behind it are read and
     dropped so the 64-byte RX buffer can't overflow (behind a reply in hand with room, they wait
     a pass in the UART).
-  - The EEPROM writer's step and the drain into the UART run every pass. The drain reaches
+  - The EEPROM writer's step and the drain into the UART run every pass, except that the
+    writer's verify-and-finish step (never a write) waits one pass when a press fired in its
+    pass, once: with @SM v4's PRESS events, three presses and a finishing job in one pass came to
+    1.04 ms. The drain reaches
     Serial1 through `sm::Uart1` (`include/sm_uart_avr.h`): HardwareSerial's own buffers, the same
     bytes and counts, without a virtual call per byte.
 
@@ -472,13 +475,19 @@ The library has no Arduino dependency, so it builds and tests on the host.
 
   | Class | Target | Worst | Where |
   | --- | --- | --- | --- |
-  | T1: one heavy unit | 750 us | 642.5 us | a press with its PRESS line while DEFAULTS writes |
-  | T2: a press as a write finishes, or two presses | 900 us | 760.5 us | a deferred press and a long press |
-  | T3: three or four presses (report only) | under 1 ms | 987.5 us | four presses, one deferred |
+  | T1: one heavy unit | 750 us | 628.5 us | a SET of 15 raw bytes |
+  | T2: a press as a write finishes, or two presses | 900 us | 739.5 us | a deferred press and a long press |
+  | T3: three or four presses (report only) | under 1 ms | 971.5 us | four presses, one deferred |
 
-  Some T1 passes: a press with its PRESS line 567.5 us (EVENTS off 287.5 us), a request arriving as
-  a press fires 620.5 us, HELLO 20 575 us, BAT 546.5 us, a GET's passes 444.5 us, a DUMP's 444 us,
-  SUM 372 us, SET 489.5 us, the battery report 474 us, 63 bytes on both ports 369 us. Before this
+  Raw commands at their longest (`test_avr_timing_v4`): a GET's passes with the 93-character SLOT
+  line 489 us (the line itself 382 us), a DUMP's 487 us, SUM over raw records 435 us, a SET of 15
+  raw bytes 628.5 us (the first write 562.5 us), a raw press with the 81-character PRESS line
+  557.5 us, a raw SET arriving as a raw press fires 607.5 us.
+
+  Some T1 passes (v3 figures; v4's are within a few us): a press with its PRESS line 567.5 us
+  (EVENTS off 287.5 us), a request arriving as a press fires 620.5 us, HELLO 20 575 us, BAT
+  546.5 us, a GET's passes 444.5 us, a DUMP's 444 us, SUM 372 us, SET 489.5 us, the battery report
+  474 us, 63 bytes on both ports 369 us. Before this
   rule and the speedups that came with it (`0a8b73f`), 61 of these figures reached 1 ms (a GET
   1.37 ms, a press 1.07 ms, DEFAULTS' last step 10.7 ms, a GET and a long press in one pass
   2.84 ms). A test fails if a T1 pass is over 750 us, a T2 pass over 900 us, or anything reaches
@@ -500,16 +509,17 @@ The library has no Arduino dependency, so it builds and tests on the host.
   write), REVERT 159-175 ms, DUMP 4.41 s to `END DUMP 72`. Those were v1, before double taps; expect a
   DUMP of about 12.5 s (v3, 216 slots) and a SUM of about 0.5 s now (not yet measured on the droid).
 - **Memory:**
-  - Static SRAM is 2978 bytes (`0a8b73f`: 2968 with a version string of the same length). The SLOT
-    reply in hand takes 20 and the pass ledger 3; the hex digit table (17) went to flash.
-  - Flash is 56,972 of 253,952 bytes (`0a8b73f`: 53,178): the CRC byte planes (1.5 KB) and the
-    assembly, the head CRC states, the Serial1 adapter.
+  - Static SRAM is 2998 bytes (`0a8b73f`: 2968 with a version string of the same length; v3 with
+    this timing work 2978). The SLOT reply in hand takes 20 and the pass ledger 3; the hex digit
+    table (17) went to flash; v4 adds the longer OK SET echo and the raw flags.
+  - Flash is 58,064 of 253,952 bytes (`0a8b73f`: 53,178): the CRC byte planes (1.5 KB) and the
+    assembly, the head CRC states, the Serial1 adapter, raw commands.
 
 ## Testing
 
 ```bash
-pio test -e native                        # host: 174 tests (+33 AVR-only, skipped)
-pio test -e simavr --without-uploading    # emulated ATmega2560: 206 (+1 host-only, skipped)
+pio test -e native                        # host: 202 tests (+37 AVR-only, skipped)
+pio test -e simavr --without-uploading    # emulated ATmega2560: 238 (+1 host-only, skipped)
 python3 -m unittest tools/shadowmap/test_shadowmap.py   # reference client vs. the firmware logic
 python3 -m unittest tools/shadowmap/test_transcripts.py # what SHADOW sends, against 0a8b73f
 ```
