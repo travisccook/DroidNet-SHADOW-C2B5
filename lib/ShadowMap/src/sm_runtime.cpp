@@ -160,6 +160,7 @@ bool Runtime::fire(uint8_t slot, bool modFromOther, FiredPress *fired) {
     Source src = Source::Default;
     if (!store_.keyForSlot(slot, key, &src))
         return false;
+    fired_ = true;
     bool queued = false;
     if (key[0] != '\0')
         queued = pushCommand(tx_, store_.prefix(), key, store_.suffix());
@@ -194,25 +195,26 @@ constexpr uint8_t kAnnounceHeadLen = sizeof(kAnnounceHead) - 1;
 static_assert(kAnnounceHeadLen + 2 + 1 == Runtime::kAnnounceOverhead, "announce overhead");
 }  // namespace
 
-void Runtime::announce(uint32_t nowMs) {
+bool Runtime::announce(uint32_t nowMs) {
     if (!announcing_ || static_cast<int32_t>(nowMs - nextAnnounce_) < 0)
-        return;
+        return false;
     // @WDP1 {"type":"Shadow","fw":"<fw>"}
     char line[64];
     const size_t fwLen = strlen(announceFw_);
     if (kAnnounceHeadLen + fwLen + 2 >= sizeof(line)) {
         announcing_ = false;  // main.cpp's static_assert rules this out; stop rather than truncate
-        return;
+        return false;
     }
     const uint8_t len = static_cast<uint8_t>(kAnnounceHeadLen + fwLen + 2);
     if (tx_.freeSpace() < len + 1 + kCommandHeadroom)
-        return;  // busy right now; try again next pass
+        return false;  // busy right now; try again next pass
     memcpy_P(line, kAnnounceHead, kAnnounceHeadLen);
     memcpy(line + kAnnounceHeadLen, announceFw_, fwLen);
     line[len - 2] = '"';
     line[len - 1] = '}';
     tx_.pushLine2(line, len, nullptr, 0);
     nextAnnounce_ = nowMs + between(kAnnounceMinMs, kAnnounceMaxMs);
+    return true;
 }
 
 void Runtime::startBattery(ReplyPort &port, uint32_t nowMs) {
@@ -231,15 +233,16 @@ bool Runtime::batteries(uint32_t nowMs, bool footConnected, uint8_t footStatus, 
     return changed;
 }
 
-void Runtime::reportBattery(uint32_t nowMs) {
+bool Runtime::reportBattery(uint32_t nowMs) {
     if (batteryPort_ == nullptr)
-        return;
+        return false;
     if (!batteryChanged_ && static_cast<int32_t>(nowMs - nextBattery_) < 0)
-        return;
+        return false;
     if (!protocol_.sendBattery(*batteryPort_))
-        return;  // busy right now; try again next pass
+        return false;  // busy right now; try again next pass
     batteryChanged_ = false;
     nextBattery_ = nowMs + kBatteryPeriodMs;
+    return true;
 }
 
 }  // namespace sm

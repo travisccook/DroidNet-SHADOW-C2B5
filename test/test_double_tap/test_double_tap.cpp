@@ -38,8 +38,8 @@ const PadState kOff = {false, 0};
 const uint8_t kUp2 = slotIndex(Ctrl::F, Mod::NONE, Btn::UP, Tap::DOUBLE);
 
 bool pass(uint32_t t, PadState foot, PadState dome = kOff) {
+    const bool fired = rig->runtime.buttons(t, foot, dome, &rig->fired);  // main.cpp's order
     rig->runtime.pump(rig->in, rig->reader, rig->wcbPort);
-    const bool fired = rig->runtime.buttons(t, foot, dome, &rig->fired);
     rig->runtime.service(t, rig->wcb);
     rig->eeprom.tick();
     rig->wcb.refill();

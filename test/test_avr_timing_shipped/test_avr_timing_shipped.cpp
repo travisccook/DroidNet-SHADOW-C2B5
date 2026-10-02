@@ -91,8 +91,11 @@ static void test_shipped_defaults() {
     const char *get = crcLine(PSTR("@SM GET D L1 L3"));
     uint16_t t = ticksOf([&] { handled = protocol.handleLine(get, port); });
     TEST_ASSERT_TRUE(handled);
+    record(PSTR("firmware defaults: handleLine GET D L1 L3 (15-char key, 15-char default): slot read"), t);
+    t = ticksOf([&] { handled = protocol.service(); });
+    TEST_ASSERT_TRUE(handled);
     drainAll();
-    record(PSTR("firmware defaults: handleLine GET D L1 L3 (15-char key, 15-char default)"), t, kT1,
+    record(PSTR("firmware defaults: service() GET D L1 L3: SLOT line sent"), t, kT1,
            static_cast<uint8_t>(wcb.last - kRoute20));
 
     pass = Worst();

@@ -101,9 +101,10 @@ void worstState(bool events = true) {
     protocol.setPads(true, true);
 }
 
-// One loop() pass of the mapping, in main.cpp's order, with Serial1's TX ring empty first (the
-// UART has sent everything: the most the drain can write in a pass). Each part is timed on its
-// own; the pass is their sum.
+// One loop() pass of the mapping, in main.cpp's order (mappedButtons(), then serviceMapping():
+// pump, pump, batteries, service), with Serial1's TX ring empty first (the UART has sent
+// everything: the most the drain can write in a pass). Each part is timed on its own; the pass is
+// their sum.
 struct PassParts {
     uint16_t wcbPump, usbPump, buttons, batteries, service;
     uint16_t total() const { return static_cast<uint16_t>(wcbPump + usbPump + buttons + batteries + service); }
@@ -132,9 +133,9 @@ uint16_t loopPass(uint32_t now, const PadState &foot, const PadState &dome, uint
     SerialPoke::dropTx1();
     io.tick();
     gFinishing = store.finishDue();
+    gLast.buttons = ticksOf([&] { gAny = runtime.buttons(now, foot, dome, &gFired); });
     gLast.wcbPump = ticksOf([] { runtime.pump(SMT_WCB_UART, wcbLines, port); });
     gLast.usbPump = ticksOf([] { runtime.pump(Serial, usbLines, usbPort); });
-    gLast.buttons = ticksOf([&] { gAny = runtime.buttons(now, foot, dome, &gFired); });
     gLast.batteries = ticksOf([&] { runtime.batteries(now, foot.connected, footBatt, dome.connected, domeBatt); });
     gLast.service = ticksOf([&] { runtime.service(now, SMT_WCB_UART, mayAnnounce); });
     return gLast.total();
@@ -155,8 +156,8 @@ struct ClassWorst {
 void recordPass(PGM_P what, const WorstPass &w, uint8_t cls = kT1) {
     record(what, w.ticks(), cls);
     const PassParts &p = w.parts;
-    say(PSTR("  parts: WCB pump %u.%u, USB pump %u.%u, buttons %u.%u, batteries %u.%u, service %u.%u us (%u passes)"),
-        p.wcbPump / 2, (p.wcbPump & 1) * 5, p.usbPump / 2, (p.usbPump & 1) * 5, p.buttons / 2, (p.buttons & 1) * 5,
+    say(PSTR("  parts: buttons %u.%u, WCB pump %u.%u, USB pump %u.%u, batteries %u.%u, service %u.%u us (%u passes)"),
+        p.buttons / 2, (p.buttons & 1) * 5, p.wcbPump / 2, (p.wcbPump & 1) * 5, p.usbPump / 2, (p.usbPump & 1) * 5,
         p.batteries / 2, (p.batteries & 1) * 5, p.service / 2, (p.service & 1) * 5, w.passes);
 }
 

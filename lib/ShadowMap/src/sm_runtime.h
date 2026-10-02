@@ -36,6 +36,8 @@ class Runtime {
     // @WDP1 {"type":"Shadow","fw":"<fw>"}\r
     static constexpr uint8_t kAnnounceOverhead = 32;
     static constexpr uint8_t kMaxBytesPerPass = 64;
+    static constexpr uint8_t kFireRxBytes = 16;  // both ports together, in a pass that fired a press
+    static constexpr uint8_t kRxHeavy = 16;      // a pass that read this many bytes takes no request in
     static constexpr uint32_t kDeferMaxMs = 250;  // a deferred press older than this is dropped
     static constexpr uint16_t kDoubleTapMs = 350;  // default window from the first press to the second
     static constexpr uint16_t kLongPressMs = 600;  // default hold for a long press
@@ -76,53 +78,83 @@ class Runtime {
     // long press waits to be released or held long enough.
     bool tapPending() const { return taps_[0].pending != kNoSlot || taps_[1].pending != kNoSlot; }
 
-    // Reads @SM requests from `port` without blocking, at most kMaxBytesPerPass bytes a pass.
-    // A request that can't be answered yet (reply queue full, EEPROM busy) stays in `reader`
-    // for the next pass; bytes arriving meanwhile are read and dropped so the UART's RX buffer
-    // can't overflow. The Pi sends one request at a time and resends after a timeout.
+    // Reads @SM requests from `port` without blocking, at most kMaxBytesPerPass bytes a pass
+    // (kFireRxBytes for both ports together in a pass that fired a press). One request a pass is
+    // taken in, and not in a pass that fired a press, read kRxHeavy bytes or more, or finishes an
+    // EEPROM job (MapStore::finishDue): a ready line then waits, and the bytes behind it wait in
+    // the UART, for a later pass. Nothing more is read in a pass that took a request in. A request
+    // that can't be answered yet (reply queue full, EEPROM busy) stays in `reader`; bytes arriving
+    // meanwhile are read and dropped so the UART's RX buffer can't overflow. The Pi sends one
+    // request at a time and resends after a timeout.
     template <class Serial>
     void pump(Serial &port, LineReader &reader, ReplyPort &replies) {
         uint8_t budget = kMaxBytesPerPass;
-        while (budget > 0) {
+        if (fired_)
+            budget = rxBytes_ < kFireRxBytes ? static_cast<uint8_t>(kFireRxBytes - rxBytes_) : 0;
+        for (;;) {
             if (reader.ready()) {
-                if (!protocol_.handleLine(reader.line(), replies)) {
+                if (intake_ || fired_ || rxBytes_ >= kRxHeavy || store_.finishDue())
+                    return;  // a later pass takes it in
+                // A line that can't be answered yet is held without being taken in (so the pass
+                // stays light and a SLOT reply in hand can go out), or taken in and refused
+                // (EEPROM busy). Behind a short wait the bytes stay in the UART; behind a long
+                // one they are read and dropped.
+                const Protocol::Hold hold = protocol_.holdFor(reader.line(), replies);
+                if (hold == Protocol::Hold::Wait)
+                    return;
+                if (hold == Protocol::Hold::Take)
+                    intake_ = true;
+                if (hold == Protocol::Hold::WaitDrain || !protocol_.handleLine(reader.line(), replies)) {
                     while (budget > 0) {
                         uint8_t n = batch(port.available(), budget);
                         if (n == 0)
                             return;
                         budget = static_cast<uint8_t>(budget - n);
+                        rxBytes_ = static_cast<uint8_t>(rxBytes_ + n);
                         for (; n > 0; --n)
                             reader.discard(static_cast<char>(port.read()));
                     }
                     return;
                 }
                 reader.consume();
+                return;
             }
             // As many bytes as are waiting (up to the budget), with one available() call: a line
-            // that completes stops the batch so it's handled before the next byte is read.
-            uint8_t n = batch(port.available(), budget);
+            // that completes stops the batch so it's seen before the next byte is read.
+            const uint8_t n = batch(port.available(), budget);
             if (n == 0)
                 return;
-            for (; n > 0; --n) {
-                --budget;
+            uint8_t took = 0;  // counted here, not in rxBytes_: the reader's stores may alias it
+            while (took < n) {
+                ++took;
                 if (reader.feed(static_cast<char>(port.read())))
                     break;
             }
+            budget = static_cast<uint8_t>(budget - took);
+            rxBytes_ = static_cast<uint8_t>(rxBytes_ + took);
         }
     }
 
-    // Every pass, faults included: finishes protocol work, advances EEPROM writes, sends the
-    // announce and battery report when due, and hands queued bytes to the WCB's UART. Pass
-    // `mayAnnounce` false while a controller fault is active: a due announce then waits for
-    // the fault to clear. Battery reports carry on through a fault.
+    // Every pass, faults included, after buttons() and both pumps: in a pass with nothing heavy in
+    // it (no press fired, no request taken in, kRxHeavy bytes or more read, an EEPROM job
+    // finishing), the first of these that has work does one unit: the announce (due every 25-30 s,
+    // so it can't hold anything up, and nothing can hold it up), the protocol's next line or DUMP
+    // read, the battery report (which a DUMP holds until its end, as before), a SUM step. Then,
+    // every pass, the EEPROM writer's step and the drain of queued bytes into the WCB's UART. Pass
+    // `mayAnnounce` false while a controller fault is active: a due announce then waits for the
+    // fault to clear. Battery reports carry on through a fault.
     template <class Serial>
     void service(uint32_t nowMs, Serial &wcb, bool mayAnnounce = true) {
-        protocol_.service();
+        const bool heavy = fired_ || intake_ || rxBytes_ >= kRxHeavy || store_.finishDue();
+        if (!heavy) {
+            if (!(mayAnnounce && announce(nowMs)) && !protocol_.serviceLine() && !reportBattery(nowMs))
+                protocol_.serviceSum();
+        }
         store_.step();
-        if (mayAnnounce)
-            announce(nowMs);
-        reportBattery(nowMs);
         tx_.drain(wcb);
+        fired_ = false;
+        intake_ = false;
+        rxBytes_ = 0;
     }
 
   private:
@@ -157,8 +189,8 @@ class Runtime {
     bool legacy(uint8_t slot, bool fromOther, uint32_t nowMs, FiredPress *fired);
     bool fireOrDefer(uint8_t slot, bool modFromOther, uint32_t nowMs, FiredPress *fired);
     bool fire(uint8_t slot, bool modFromOther, FiredPress *fired);
-    void announce(uint32_t nowMs);
-    void reportBattery(uint32_t nowMs);
+    bool announce(uint32_t nowMs);       // true if it queued the announce
+    bool reportBattery(uint32_t nowMs);  // true if it queued a battery report
     uint32_t between(uint32_t lo, uint32_t hi);  // pseudo-random, lo..hi inclusive
 
     MapStore &store_;
@@ -183,6 +215,11 @@ class Runtime {
     ReplyPort *batteryPort_ = nullptr;
     bool batteryChanged_ = false;  // a level changed since the last report
     uint32_t nextBattery_ = 0;
+
+    // This pass so far (cleared at the end of service()).
+    bool fired_ = false;   // a press fired
+    bool intake_ = false;  // a request was taken in
+    uint8_t rxBytes_ = 0;  // bytes read from both ports
 };
 
 }  // namespace sm

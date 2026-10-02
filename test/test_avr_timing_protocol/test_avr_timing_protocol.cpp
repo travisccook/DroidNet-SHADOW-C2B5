@@ -67,6 +67,26 @@ uint16_t timeLine(const char *line) {
     return t;
 }
 
+// A GET: its request pass reads the slot (handleLine), a later pass sends the line (service).
+struct GetTimes {
+    uint16_t read, send;
+};
+GetTimes timeGet(const char *line) {
+    drainAll();
+    wcb.last = 0;
+    GetTimes g;
+    bool handled = false;
+    g.read = ticksOf([&] { handled = protocol.handleLine(line, port); });
+    TEST_ASSERT_TRUE(handled);
+    TEST_ASSERT_TRUE(protocol.opInProgress());  // the reply is in hand
+    bool sent = false;
+    g.send = ticksOf([&] { sent = protocol.service(); });
+    TEST_ASSERT_TRUE(sent);
+    TEST_ASSERT_FALSE(protocol.opInProgress());
+    drainAll();
+    return g;
+}
+
 void hexOf(const char *s, char *out) {
     static const char kHex[] = "0123456789ABCDEF";
     for (; *s != '\0'; ++s) {
@@ -134,18 +154,21 @@ static void test_requests() {
     protocol.service();
     drainAll();
 
-    t = timeLine(crcLine(PSTR("@SM GET F CIRCLE RIGHTL")));
+    GetTimes g = timeGet(crcLine(PSTR("@SM GET F CIRCLE RIGHTL")));
     TEST_ASSERT_EQUAL_UINT8(78, replyLen());
-    record(PSTR("handleLine GET F CIRCLE RIGHTL (stale 15-char record, 15-char default)"), t, kT1, replyLen());
+    record(PSTR("handleLine GET F CIRCLE RIGHTL (stale 15-char record, 15-char default): slot read"), g.read);
+    record(PSTR("service() GET F CIRCLE RIGHTL (stale record): SLOT line sent"), g.send, kT1, replyLen());
 
     eeSlot(kWide, kGen, kKey15);
-    t = timeLine(crcLine(PSTR("@SM GET F CIRCLE RIGHTL")));
+    g = timeGet(crcLine(PSTR("@SM GET F CIRCLE RIGHTL")));
     TEST_ASSERT_EQUAL_UINT8(77, replyLen());
-    record(PSTR("handleLine GET F CIRCLE RIGHTL (15-char key over 15-char default)"), t, kT1, replyLen());
+    record(PSTR("handleLine GET F CIRCLE RIGHTL (15-char key over 15-char default): slot read"), g.read);
+    record(PSTR("service() GET F CIRCLE RIGHTL (15-char key): SLOT line sent"), g.send, kT1, replyLen());
     eeSlot(kWide, kGen - 1, kKey15);
 
-    record(PSTR("handleLine GET D CIRCLE RIGHT (stale record, 15-char default)"),
-           timeLine(crcLine(PSTR("@SM GET D CIRCLE RIGHT"))), kT1, replyLen());
+    g = timeGet(crcLine(PSTR("@SM GET D CIRCLE RIGHT")));
+    record(PSTR("handleLine GET D CIRCLE RIGHT (stale record, 15-char default): slot read"), g.read);
+    record(PSTR("service() GET D CIRCLE RIGHT (stale record): SLOT line sent"), g.send, kT1, replyLen());
 
     // 72 characters, the longest line LineReader passes on.
     char body[LineReader::kMaxLen + 1];
@@ -371,12 +394,12 @@ static void test_parts() {
     wcb.note();
     drainAll();
 
-    // The cost of one more key character in a SLOT reply (formatting, CRC32, queueing): GET of a
-    // 15- and a 1-character key on F CIRCLE RIGHTL.
+    // The cost of one more key character in a SLOT reply (formatting, CRC32, queueing): the reply
+    // pass of a GET of a 15- and a 1-character key on F CIRCLE RIGHTL.
     eeSlot(kWide, kGen, kKey15);
-    const uint16_t get15 = timeLine(crcLine(PSTR("@SM GET F CIRCLE RIGHTL")));
+    const uint16_t get15 = timeGet(crcLine(PSTR("@SM GET F CIRCLE RIGHTL"))).send;
     eeSlot(kWide, kGen, "z");
-    const uint16_t get1 = timeLine(crcLine(PSTR("@SM GET F CIRCLE RIGHTL")));
+    const uint16_t get1 = timeGet(crcLine(PSTR("@SM GET F CIRCLE RIGHTL"))).send;
     part(PSTR("GET, 15-char key minus 1-char key (14 more chars)"), static_cast<uint16_t>(get15 - get1));
     eeSlot(kWide, kGen - 1, kKey15);
 

@@ -372,14 +372,15 @@ static void test_loop_passes() {
     if (sweep.t2.passes > 0)
         recordPass(PSTR("loop pass: SET finishing + long press fires, swept"), sweep.t2, kT2);
 
-    // DEFAULTS in flight, with presses.
+    // DEFAULTS in flight, with presses (every third pass: a press takes the room a reply needs,
+    // so a request waits for a pass when there is some).
     worstState();
     io.busyPasses = 2;
     injectLine(PSTR("@SM DEFAULTS"));
     ClassWorst defaults;
     now = 400000UL;
-    for (uint16_t i = 0; i < 400 && (store.busy() || protocol.opInProgress() || i < 4); ++i) {
-        const bool press = (i & 1) == 0;
+    for (uint16_t i = 0; i < 800 && (store.busy() || protocol.opInProgress() || store.generation() != 65535); ++i) {
+        const bool press = i % 3 == 0;
         now += press ? 1100 : 10;
         loopPass(now, press ? kFootCircle : kNone, press ? kDomeRight : kNone);
         defaults.add();

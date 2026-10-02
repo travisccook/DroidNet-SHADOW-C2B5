@@ -64,12 +64,31 @@ class Protocol {
     Protocol(MapStore &store, const char *fwVersion) : store_(store), fw_(fwVersion) {}
 
     // Handles one complete "@SM" line. Returns false, having done nothing, when it can't be
-    // answered yet (the port is full, or the EEPROM is mid-write); call again later with
-    // the same line.
+    // answered yet (the port is full, the EEPROM is mid-write, or a SLOT reply is still in hand
+    // for this port, or for any port if this is a GET); call again later with the same line.
+    // A GET reads its slot here and sends the line from serviceLine() on a later pass.
     bool handleLine(const char *line, ReplyPort &port);
 
-    // Finishes writes, sends their replies and paces DUMP. Call every loop pass.
-    void service();
+    // Whether handleLine() would hold `line`, found without looking at it further, so
+    // Runtime::pump can leave it for a later pass without counting it as a request taken in
+    // (which would keep a SLOT reply in hand from going out):
+    //   Take      no reason to wait
+    //   Wait      a SLOT reply is in hand for this port (or, for a GET, for any port) and has room:
+    //             it goes out on the next light pass; the bytes behind the line can stay in the UART
+    //   WaitDrain no room on `port`, or the reply in hand has none: the wait may be long, so the
+    //             bytes behind it are read and dropped, as for any held request
+    enum class Hold : uint8_t { Take, Wait, WaitDrain };
+    Hold holdFor(const char *line, ReplyPort &port);
+
+    // The protocol's background work, one unit a call, in this order: a controller event, the
+    // SLOT reply in hand (if its port has room), then the operation's next step (the SUM reply,
+    // END DUMP, a DUMP slot read, or a write's reply). Returns true if it queued a line or read
+    // a slot. A SLOT reply waiting for room doesn't hold up the rest.
+    bool serviceLine();
+    // One SUM step (a slot read and its CRC); false while there is none or the EEPROM is busy.
+    bool serviceSum();
+    // serviceLine(), or else serviceSum(): one unit. Runtime::service calls the two itself.
+    bool service() { return serviceLine() || serviceSum(); }
 
     // A combo reached the mapping (mapped or not). Sent to whichever port asked for EVENTS,
     // if there's room; `modFromOther` says the modifier was held on the other controller.
@@ -85,13 +104,15 @@ class Protocol {
     // nothing if the port has no room right now; returns whether it was sent.
     bool sendBattery(ReplyPort &port);
 
-    bool opInProgress() const { return op_ != Op::None; }
+    // An operation, or a SLOT reply read but not yet sent: keep calling service().
+    bool opInProgress() const { return op_ != Op::None || slotOut_ != kNoSlot; }
 
   private:
     enum class Op : uint8_t { None, Set, Revert, Defaults, Prefix, Suffix, Dump, Sum };
 
-    bool sendSlotLine(uint8_t slot, ReplyPort &port);
-    void servicePads();
+    bool readSlot(uint8_t slot, ReplyPort &port);
+    bool sendSlotReply();
+    bool servicePads();
     void sendOpReply(bool ok);
     void startOp(Op op, ReplyPort &port, MapStore::Result r, const char *verb, uint8_t slot);
 
@@ -106,6 +127,13 @@ class Protocol {
     bool opOk_ = false;
     uint8_t dumpNext_ = 0;  // next slot for DUMP / SUM
     uint32_t sumCrc_ = 0;
+
+    // A SLOT reply (GET or a DUMP line) is read on one loop pass (the slot's record and its
+    // CRC) and formatted and sent on a later one, so neither pass does both.
+    uint8_t slotOut_ = kNoSlot;
+    ReplyPort *slotOutPort_ = nullptr;
+    char slotOutKey_[kKeyBuf] = {};
+    Source slotOutSrc_ = Source::Default;
 
     ReplyPort *eventPort_ = nullptr;
     uint8_t pads_ = 0;          // bit 0 foot, bit 1 dome

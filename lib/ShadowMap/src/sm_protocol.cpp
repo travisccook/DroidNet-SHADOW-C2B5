@@ -197,9 +197,25 @@ void WcbPort::buildRoute() {
 // ---------------------------------------------------------------------------------------
 // Protocol
 
+Protocol::Hold Protocol::holdFor(const char *line, ReplyPort &port) {
+    if (!port.canSend(kMaxLine))
+        return Hold::WaitDrain;
+    if (slotOut_ == kNoSlot)
+        return Hold::Take;
+    // A line that may be a GET ("@SM GET" and a space or its end) waits too; if it isn't one it
+    // only waits a pass or two longer for its error.
+    const bool waits = &port == slotOutPort_ ||
+                       (strncmp(line, "@SM GET", 7) == 0 && (line[7] == ' ' || line[7] == '\0'));
+    if (!waits)
+        return Hold::Take;
+    return slotOutPort_->canSend(kMaxLine) ? Hold::Wait : Hold::WaitDrain;
+}
+
 bool Protocol::handleLine(const char *line, ReplyPort &port) {
     if (!port.canSend(kMaxLine))
         return false;
+    if (slotOut_ != kNoSlot && &port == slotOutPort_)
+        return false;  // its SLOT reply goes first: replies keep their requests' order
 
     // One pass copies the line and finds its end.
     char work[LineReader::kMaxLen + 1];
@@ -304,7 +320,9 @@ bool Protocol::handleLine(const char *line, ReplyPort &port) {
             sendError(port, PSTR("slot"), verb, kNoSlot);
             return true;
         }
-        return sendSlotLine(slot, port);  // false: EEPROM busy, try again next pass
+        if (slotOut_ != kNoSlot)
+            return false;  // one SLOT reply in hand at a time
+        return readSlot(slot, port);  // false: EEPROM busy, try again next pass
     }
 
     if (v0 == 'E' && strcmp_P(verb, PSTR("EVENTS")) == 0) {
@@ -428,63 +446,72 @@ void Protocol::startOp(Op op, ReplyPort &port, MapStore::Result r, const char *v
     }
 }
 
-void Protocol::service() {
-    servicePads();
+bool Protocol::serviceLine() {
+    if (servicePads())
+        return true;
+    if (slotOut_ != kNoSlot && sendSlotReply())
+        return true;
     if (op_ == Op::None || opPort_ == nullptr)
-        return;
+        return false;
 
     if (op_ == Op::Sum) {
         // CRC32 of every SLOT line's text after "@SM SLOT " (as DUMP sends it), each followed
-        // by '\n': one slot per pass, one reply at the end.
-        if (dumpNext_ < kSlotCount) {
-            char key[kKeyBuf];
-            Source src = Source::Default;
-            if (!store_.keyForSlot(dumpNext_, key, &src))
-                return;  // EEPROM busy: next pass
-            Out body;
-            body.slot(dumpNext_);
-            slotRest(body, store_, dumpNext_, key, src);
-            sumCrc_ = crc32Block(sumCrc_, reinterpret_cast<const uint8_t *>(body.str()), body.len());
-            sumCrc_ = crc32Update(sumCrc_, '\n');
-            ++dumpNext_;
-            return;
-        }
-        if (!opPort_->canSend(kMaxLine))
-            return;
+        // by '\n': one slot per pass (serviceSum), one reply at the end.
+        if (dumpNext_ < kSlotCount || !opPort_->canSend(kMaxLine))
+            return false;
         Out out;
         out.p(PSTR("@SM SUM ")).hex32(crc32Final(sumCrc_)).p(PSTR(" slots=")).u(kSlotCount);
         emit(out, *opPort_);
         op_ = Op::None;
-        return;
+        return true;
     }
 
     if (op_ == Op::Dump) {
-        if (!opPort_->canSend(kMaxLine))
-            return;
+        // A slot is read on one pass and its line sent from the reply in hand on a later one.
+        if (slotOut_ != kNoSlot || !opPort_->canSend(kMaxLine))
+            return false;
         if (dumpNext_ >= kSlotCount) {
             Out out;
             out.p(PSTR("@SM END DUMP ")).u(kSlotCount);
             emit(out, *opPort_);
             op_ = Op::None;
-            return;
+            return true;
         }
-        if (sendSlotLine(dumpNext_, *opPort_))
-            ++dumpNext_;
-        return;
+        if (!readSlot(dumpNext_, *opPort_))
+            return false;  // EEPROM busy: next pass
+        ++dumpNext_;
+        return true;
     }
 
     if (!replyPending_) {
         const MapStore::Completion c = store_.takeCompletion();
         if (c == MapStore::Completion::None)
-            return;
+            return false;
         opOk_ = c == MapStore::Completion::Done;
         replyPending_ = true;
     }
     if (!opPort_->canSend(kMaxLine))
-        return;
+        return false;
     sendOpReply(opOk_);
     replyPending_ = false;
     op_ = Op::None;
+    return true;
+}
+
+bool Protocol::serviceSum() {
+    if (op_ != Op::Sum || opPort_ == nullptr || dumpNext_ >= kSlotCount)
+        return false;
+    char key[kKeyBuf];
+    Source src = Source::Default;
+    if (!store_.keyForSlot(dumpNext_, key, &src))
+        return false;  // EEPROM busy: next pass
+    Out body;
+    body.slot(dumpNext_);
+    slotRest(body, store_, dumpNext_, key, src);
+    sumCrc_ = crc32Block(sumCrc_, reinterpret_cast<const uint8_t *>(body.str()), body.len());
+    sumCrc_ = crc32Update(sumCrc_, '\n');
+    ++dumpNext_;
+    return true;
 }
 
 void Protocol::sendOpReply(bool ok) {
@@ -525,15 +552,25 @@ void Protocol::sendOpReply(bool ok) {
     emit(out, *opPort_);
 }
 
-bool Protocol::sendSlotLine(uint8_t slot, ReplyPort &port) {
-    char key[kKeyBuf];
-    Source src = Source::Default;
-    if (!store_.keyForSlot(slot, key, &src))
+// A SLOT reply's first pass: reads the slot into the reply in hand. False, with nothing read,
+// while the EEPROM is mid-write.
+bool Protocol::readSlot(uint8_t slot, ReplyPort &port) {
+    if (!store_.keyForSlot(slot, slotOutKey_, &slotOutSrc_))
+        return false;
+    slotOut_ = slot;
+    slotOutPort_ = &port;
+    return true;
+}
+
+// Its second: formats and sends the slot read on an earlier pass, once the port has room.
+bool Protocol::sendSlotReply() {
+    if (!slotOutPort_->canSend(kMaxLine))
         return false;
     Out out;
-    out.head(Out::Head::Slot, slot);
-    slotRest(out, store_, slot, key, src);
-    emit(out, port);
+    out.head(Out::Head::Slot, slotOut_);
+    slotRest(out, store_, slotOut_, slotOutKey_, slotOutSrc_);
+    emit(out, *slotOutPort_);
+    slotOut_ = kNoSlot;
     return true;
 }
 
@@ -597,15 +634,16 @@ void Protocol::setPads(bool footConnected, bool domeConnected) {
 }
 
 // With EVENTS on, one "@SM CTL <F|D> <0|1>" per controller that connected or dropped.
-void Protocol::servicePads() {
+bool Protocol::servicePads() {
     if (eventPort_ == nullptr || pads_ == padsReported_ || !eventPort_->canSend(kMaxLine))
-        return;
+        return false;
     const uint8_t changed = static_cast<uint8_t>(pads_ ^ padsReported_);
     const uint8_t bit = (changed & 1) ? 1 : 2;
     Out out;
     out.p(PSTR("@SM CTL ")).c(bit == 1 ? 'F' : 'D').c(' ').c((pads_ & bit) ? '1' : '0');
     emit(out, *eventPort_);
     padsReported_ = static_cast<uint8_t>(padsReported_ ^ bit);
+    return true;
 }
 
 }  // namespace sm

@@ -56,11 +56,11 @@ Rig *rig = nullptr;
 
 const PadState kOff = {false, 0};
 
-// One loop() pass at time `t`: requests in, buttons, service out.
+// One loop() pass at time `t`: buttons, requests in, service out.
 bool pass(uint32_t t, PadState foot, PadState dome = kOff) {
     rig->now = t;
+    const bool fired = rig->runtime.buttons(t, foot, dome, &rig->fired);  // main.cpp's order
     rig->runtime.pump(rig->in, rig->reader, rig->wcbPort);
-    const bool fired = rig->runtime.buttons(t, foot, dome, &rig->fired);
     rig->runtime.service(t, rig->wcb);
     rig->eeprom.tick();
     rig->wcb.refill();
@@ -225,10 +225,14 @@ static void test_pump_keeps_the_uart_drained_while_a_reply_waits() {
     char stream[200];
     snprintf(stream, sizeof(stream), "%s\r%s", req, "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
     rig->in.load(stream);
-    rig->runtime.pump(rig->in, rig->reader, rig->wcbPort);
+    // Passes that send nothing (no room): the line arrives, then can't be answered, and the noise
+    // behind it is read and dropped rather than left to overflow the UART.
+    for (uint32_t t = 1; t <= 3; ++t) {
+        rig->runtime.pump(rig->in, rig->reader, rig->wcbPort);
+        rig->runtime.service(t, rig->wcb);
+    }
     TEST_ASSERT_TRUE(rig->reader.ready());  // held: no room to reply
-    rig->runtime.pump(rig->in, rig->reader, rig->wcbPort);
-    TEST_ASSERT_EQUAL_UINT32(rig->in.len, rig->in.pos);  // and the noise was read, not left to overflow
+    TEST_ASSERT_EQUAL_UINT32(rig->in.len, rig->in.pos);
     // Once there's room, the held request is answered.
     for (uint32_t t = 1; t < 400 && rig->wcb.usb.count == 0; ++t)
         pass(t, held(0));
@@ -363,9 +367,10 @@ static void test_events_follow_presses_and_controllers() {
     withCrc("@SM EVENTS 1", req, sizeof(req));
     rig->in.load(req);
     rig->in.data[rig->in.len++] = '\r';
-    pass(0, held(0));
-    pass(1, held(0));
+    pass(0, kOff);  // the line arrives
+    pass(1, kOff);  // taken in
     TEST_ASSERT_TRUE(piSawRecently("@SM OK EVENTS 1"));
+    pass(2, held(0));
     TEST_ASSERT_TRUE(piSawRecently("@SM CTL F 1"));  // the foot showed up after EVENTS
 
     pass(10, held(kHeldUp), held(kHeldCross));

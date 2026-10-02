@@ -312,9 +312,14 @@ void watchBatteries() {
 #endif
 }
 
-// Everything the mapping does between button presses. Runs every pass, faults included, but
-// SHADOW doesn't announce itself to the WCB while a controller fault is active.
+// Everything the mapping does besides firing presses: @SM requests from DroidNet (via the WCB)
+// or the USB port, battery levels, then the protocol's background work, the EEPROM writer and
+// the WCB queue (sm::Runtime::pump and service: at most one heavy thing a pass besides presses).
+// Runs every pass, after mappedButtons(), faults included, but SHADOW doesn't announce itself to
+// the WCB while a controller fault is active. Never blocks.
 void serviceMapping(bool faulted) {
+    mapRuntime.pump(wcbUart, wcbLines, wcbReplies);
+    mapRuntime.pump(Serial, usbLines, usbReplies);
     watchBatteries();
     mapRuntime.service(millis(), wcbUart, !faulted);
 }
@@ -1405,10 +1410,6 @@ void loop() {
 #endif
 
     // LOOP through functions from highest to lowest priority.
-
-    // Mapping edits from DroidNet (via the WCB) or the USB port. Never blocks.
-    mapRuntime.pump(wcbUart, wcbLines, wcbReplies);
-    mapRuntime.pump(Serial, usbLines, usbReplies);
 
     if (!readUSB()) {
         // We have a fault condition that we want to ensure that we do NOT process any controller data!!!

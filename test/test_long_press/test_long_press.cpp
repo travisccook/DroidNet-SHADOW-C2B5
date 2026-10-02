@@ -43,8 +43,8 @@ const uint32_t kLong = Runtime::kLongPressMs;
 const uint32_t kWindow = Runtime::kDoubleTapMs;
 
 bool pass(uint32_t t, PadState foot, PadState dome = kOff) {
+    const bool fired = rig->runtime.buttons(t, foot, dome, &rig->fired);  // main.cpp's order
     rig->runtime.pump(rig->in, rig->reader, rig->wcbPort);
-    const bool fired = rig->runtime.buttons(t, foot, dome, &rig->fired);
     rig->runtime.service(t, rig->wcb);
     rig->eeprom.tick();
     rig->wcb.refill();

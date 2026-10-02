@@ -43,6 +43,8 @@ static void test_crc_is_required_on_the_wcb_port() {
 
 static void test_usb_port_accepts_lines_without_crc() {
     TEST_ASSERT_TRUE(rig->protocol.handleLine("@SM GET F L1 UP", rig->usb));
+    TEST_ASSERT_EQUAL_UINT32(0, rig->usb.log.count);
+    rig->protocol.service();  // a SLOT reply goes out on a later pass than its request
     char body[96];
     TEST_ASSERT_TRUE(stripCrc(rig->usb.log.last(), body, sizeof(body)));
     TEST_ASSERT_EQUAL_STRING("@SM SLOT F L1 UP extremehappysou default def=extremehappysou", body);

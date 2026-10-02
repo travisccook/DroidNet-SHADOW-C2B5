@@ -159,9 +159,9 @@ struct Shadow {
 
 void pass(Shadow &s, FileEeprom &eeprom, StdoutUart &uart, InputQueue &in, sm::PadState foot, sm::PadState dome) {
     in.arrive();
-    s.runtime.pump(in, s.reader, s.port);
     sm::FiredPress fired;
-    s.runtime.buttons(now, foot, dome, &fired);
+    s.runtime.buttons(now, foot, dome, &fired);  // main.cpp's order: presses, then serviceMapping()
+    s.runtime.pump(in, s.reader, s.port);
     s.runtime.batteries(now, foot.connected, footBattery, dome.connected, domeBattery);
     s.runtime.service(now, uart);
     eeprom.tick();
