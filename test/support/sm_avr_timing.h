@@ -178,6 +178,7 @@ struct NullUart {
                         longest = run;
                     last = run;
                     run = 0;
+                    ++lines;
                 } else {
                     ++run;
                 }
@@ -186,6 +187,7 @@ struct NullUart {
         chunks = 0;
     }
     uint32_t bytes = 0;
+    uint16_t lines = 0;
     uint8_t run = 0;
     uint8_t last = 0;     // the last complete line, without its '\r'
     uint8_t longest = 0;  // the longest one

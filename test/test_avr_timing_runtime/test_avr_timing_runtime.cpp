@@ -203,17 +203,24 @@ static void test_button_presses() {
     TEST_ASSERT_TRUE(store.beginSet(slotIndex(Ctrl::D, Mod::L2, Btn::LEFT), kKey15) == MapStore::Result::Ok);
     store.step();  // the first byte goes out; the EEPROM is busy for three ticks
     TEST_ASSERT_FALSE(io.ready());
-    // D CIRCLE RIGHT pressed on the dome (CIRCLE from the foot... and RIGHT): can't be read now.
+    // The dome presses RIGHT while the foot also holds CIRCLE: D CIRCLE RIGHT (from=F), whose
+    // record can't be read while the EEPROM is busy, so it's deferred. The foot's combo is still
+    // F CIRCLE RIGHT, its long press still waiting.
     const PadState footBoth = {true, kHeldRight | kHeldCircle};
     TEST_ASSERT_FALSE(runtime.buttons(40590, footBoth, kDomeRight, &gFired));
+    drainAll();
+    TEST_ASSERT_EQUAL_UINT8(0, tx.used());  // nothing went out: deferred
     io.tick();
     io.tick();
     io.tick();
     TEST_ASSERT_TRUE(io.ready());
-    drainAll();
+    const uint16_t linesBefore = null.lines;
     t = ticksOf([&] { gAny = runtime.buttons(40600, footBoth, kDomeRight, &gFired); });
     TEST_ASSERT_TRUE(gAny);
+    TEST_ASSERT_EQUAL_UINT8(kWide, gFired.slot);
     drainAll();
+    // Both commands, and the first press's PRESS line (the second's waits for room: dropped).
+    TEST_ASSERT_EQUAL_UINT16(3, null.lines - linesBefore);
     record(PSTR("buttons(): a deferred press and a long press in one pass"), t);
     io.busyPasses = 0;
     for (uint16_t i = 0; i < 200 && store.busy(); ++i)
