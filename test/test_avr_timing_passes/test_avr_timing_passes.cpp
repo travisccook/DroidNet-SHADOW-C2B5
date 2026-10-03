@@ -278,8 +278,7 @@ static void test_one_press() {
         loopPass(gNow, press ? kFootCircle : kNone, press ? kDomeRight : kNone);
         w.add();
     }
-    TEST_ASSERT_FALSE(wcbLines.ready());  // the SET was taken
-    TEST_ASSERT_FALSE(store.busy());      // and written within the 160 passes
+    assertSetWritten(slotIndex(Ctrl::D, Mod::L2, Btn::LEFT, Tap::LONG));  // within the 160 passes
     settle(gNow);
     recordPass(PSTR("press pass: single with PRESS, a SET mid-write"), w.t1);
     if (w.t2.passes > 0)

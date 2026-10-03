@@ -189,6 +189,7 @@ WorstPass manyPresses(uint8_t fires, bool finishing) {
         TEST_ASSERT_EQUAL_UINT8(1, runtime.deferredCount());
         loopPass(p + 2, kFootRight, kDomeCircleDownHeld);
         TEST_ASSERT_TRUE(gAny);
+        TEST_ASSERT_EQUAL_UINT8(1, runtime.firesLastPass());
         TEST_ASSERT_EQUAL_UINT8(0, runtime.deferredCount());
         w.add(gLast);
     } else {

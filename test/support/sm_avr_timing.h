@@ -7,7 +7,7 @@
 //   T1  a pass with one heavy unit (a request taken in, a line sent, a slot read, one press fired)
 //       plus the work every pass does (the EEPROM writer's step and the drain into the UART)
 //   T2  one press fired with the EEPROM writer finishing a job in the same pass, or two presses
-//   T3  three or four presses in one pass (report only)
+//   T3  three presses in one pass (the most one pass fires: Runtime::kMaxFiresPerPass)
 //   -   a building block or an older figure kept for comparison, not a whole pass
 // The last test of each suite fails when any figure but a building block reaches 1 ms (the limit
 // test_avr enforces), and, built with -DSM_TIMING_TARGET, when a T1 figure is over 750 us or a T2

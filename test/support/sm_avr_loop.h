@@ -161,6 +161,20 @@ void recordPass(PGM_P what, const WorstPass &w, uint8_t cls = kT1) {
         (p.buttons & 1) * 5, p.batteries / 2, (p.batteries & 1) * 5, p.after / 2, (p.after & 1) * 5, w.passes);
 }
 
+// A SET of `slot` to kKey15 ("zyxwvutsrqponml") was taken from Serial1 and
+// written: nothing left in the RX buffer or the line reader, and the slot reads back the new key
+// from EEPROM.
+void assertSetWritten(uint8_t slot) {
+    TEST_ASSERT_FALSE(wcbLines.ready());
+    TEST_ASSERT_EQUAL_INT(0, Serial1.available());
+    TEST_ASSERT_FALSE(store.busy());
+    char key[kKeyBuf];
+    Source src = Source::Default;
+    TEST_ASSERT_TRUE(store.keyForSlot(slot, key, &src));
+    TEST_ASSERT_TRUE(src == Source::Eeprom);
+    TEST_ASSERT_EQUAL_INT(0, strcmp(key, kKey15));
+}
+
 // Passes with nothing held until the mapping has nothing left to do (no request waiting, no write,
 // no operation, nothing queued for the UART, no press waiting); their worst goes into `w`.
 void settle(uint32_t &now, WorstPass *w = nullptr, uint16_t maxPasses = 3000) {
