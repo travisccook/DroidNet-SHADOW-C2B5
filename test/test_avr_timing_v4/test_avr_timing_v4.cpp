@@ -32,25 +32,23 @@ constexpr PadState kFootBoth = {true, kHeldRight | kHeldCircle};
 // The route (HELLO 20) in front of every line SHADOW sends to the WCB.
 constexpr uint8_t kRoute = 8;
 
-// `body` arrives whole in Serial1's RX buffer; passes run until the mapping is done.
+// `body` (with its CRC) arrives so that the pass that takes it reads a full budget ending on its CR
+// (its first bytes read by passes before, when it is longer); passes run until the mapping is done.
 void intake(PGM_P what, PGM_P body) {
     WorstPass w;
-    injectLine(body);
+    BudgetLine b;
+    budgetLine(body, b);
+    injectBudget(b, w, gNow);
     settle(gNow, &w);
     recordPass(what, w);
 }
 
-// A line longer than the 63 bytes Serial1's RX buffer holds: its first 40 arrive a pass early.
+// `line` (in RAM, with its CRC) arrives so that the pass that takes it reads a full budget ending on
+// its CR, its first bytes read by passes before (into `w`).
 void injectLong(const char *line, WorstPass &w) {
-    char first[41];
-    memcpy(first, line, 40);
-    first[40] = '\0';
-    SerialPoke::inject(Serial1, first);
-    gNow += 2;
-    loopPass(gNow, kNone, kNone);
-    w.add(gLast);
-    SerialPoke::inject(Serial1, line + 40);
-    SerialPoke::inject(Serial1, "\r");
+    BudgetLine b;
+    budgetSplit(line, b);
+    injectBudget(b, w, gNow);
 }
 
 // The worst state with 15-character raw commands on F CIRCLE RIGHTL and D CIRCLE RIGHT, valid
@@ -346,6 +344,61 @@ static void test_raw_set_meets_raw_press() {
     io.busyPasses = 0;
 }
 
+namespace {
+
+// A full-budget GET of the raw 93-char SLOT answered in the pass where a write's verify-and-finish
+// step comes due (EEPROM ready), with both battery levels changing in it: a raw SET of a long-press
+// slot (its RAM bit reloaded), or DEFAULTS (every RAM bit reloaded). The step waits a pass after a
+// request (Runtime::finishPass); the figure is the worse of the GET's pass and the next one, which
+// finishes the write. False in `*putOff` if the step ran in the GET's pass.
+WorstPass getAsWriteFinishes(bool defaults, bool *putOff) {
+    rawState(false);
+    loopPass(gNow += 2, kNone, kNone, 1, 1);
+    settle(gNow);
+    gNow += BatteryWatch::kFirstMs;
+    BudgetLine get;
+    budgetLine(PSTR("@SM GET F CIRCLE RIGHTL"), get);
+    WorstPass lead;
+    injectBudget(get, lead, gNow);
+    if (defaults)
+        TEST_ASSERT_TRUE(store.beginDefaults() == MapStore::Result::Ok);
+    else
+        TEST_ASSERT_TRUE(store.beginSet(kL2LeftLong, kRaw15, true) == MapStore::Result::Ok);
+    for (uint8_t i = 0; i < 60 && !store.finishDue(); ++i)
+        store.step();
+    TEST_ASSERT_TRUE(store.finishDue());
+    TEST_ASSERT_TRUE(io.ready());
+    WorstPass w;
+    const uint8_t before = tx.used();
+    loopPass(gNow += 2, kNone, kNone, 1, 1);
+    TEST_ASSERT_TRUE(gFinishing);
+    TEST_ASSERT_TRUE(runtime.lastWork() == Runtime::Work::Request);
+    TEST_ASSERT_TRUE(runtime.footBattery().level() == BattLevel::Crit);
+    TEST_ASSERT_EQUAL_INT16(kRoute + 93 + 1, queuedBy(before));  // the 93-char SLOT line
+    *putOff = store.finishDue();
+    w.add(gLast);
+    loopPass(gNow += 2, kNone, kNone);  // the background unit's pass: the write finishes
+    TEST_ASSERT_FALSE(store.finishDue());
+    w.add(gLast);
+    settle(gNow);
+    TEST_ASSERT_FALSE(store.busy());
+    return w;
+}
+
+}  // namespace
+
+static void test_request_as_a_write_finishes() {
+    bool putOff = false;
+    recordPass(
+        PSTR("v4 full-budget GET (raw 93-char SLOT) answered as a raw SET's finishing step comes due, + battery"),
+        getAsWriteFinishes(false, &putOff));
+    TEST_ASSERT_TRUE_MESSAGE(putOff, "the finishing step ran in the request's pass");
+    recordPass(PSTR("v4 full-budget GET (raw 93-char SLOT) answered as DEFAULTS' finishing step comes due, + battery"),
+               getAsWriteFinishes(true, &putOff));
+    TEST_ASSERT_TRUE_MESSAGE(putOff, "the finishing step ran in the request's pass");
+    TEST_ASSERT_EQUAL_UINT16(65535, store.generation());
+}
+
 static void test_every_pass_is_under_1_ms() { checkBudget(); }
 
 #else
@@ -355,6 +408,7 @@ static void test_raw_writes() { TEST_IGNORE_MESSAGE("AVR only (pio test -e simav
 static void test_one_raw_press() { TEST_IGNORE_MESSAGE("AVR only (pio test -e simavr)"); }
 static void test_raw_presses_together() { TEST_IGNORE_MESSAGE("AVR only (pio test -e simavr)"); }
 static void test_raw_set_meets_raw_press() { TEST_IGNORE_MESSAGE("AVR only (pio test -e simavr)"); }
+static void test_request_as_a_write_finishes() { TEST_IGNORE_MESSAGE("AVR only (pio test -e simavr)"); }
 static void test_every_pass_is_under_1_ms() { TEST_IGNORE_MESSAGE("AVR only (pio test -e simavr)"); }
 
 #endif
@@ -366,6 +420,7 @@ int runAllTests() {
     RUN_TEST(test_one_raw_press);
     RUN_TEST(test_raw_presses_together);
     RUN_TEST(test_raw_set_meets_raw_press);
+    RUN_TEST(test_request_as_a_write_finishes);
     RUN_TEST(test_every_pass_is_under_1_ms);
     return UNITY_END();
 }

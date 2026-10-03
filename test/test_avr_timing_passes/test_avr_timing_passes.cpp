@@ -21,28 +21,23 @@ namespace {
 
 uint32_t gNow = 1000000UL;
 
-// `body` arrives whole in Serial1's RX buffer; passes run until the mapping is done.
+// `body` (with its CRC) arrives so that the pass that takes it reads a full budget ending on its CR
+// (its first bytes read by passes before, when it is longer); passes run until the mapping is done.
 void intake(PGM_P what, PGM_P body) {
     WorstPass w;
-    injectLine(body);
+    BudgetLine b;
+    budgetLine(body, b);
+    injectBudget(b, w, gNow);
     settle(gNow, &w);
     recordPass(what, w);
 }
 
-// A line up to 72 characters: the RX buffer holds 63 bytes, so its first 40 arrive a pass early.
+// The same for a line already in RAM, as it is (with or without a CRC).
 void intakeRam(PGM_P what, const char *line) {
     WorstPass w;
-    char first[41];
-    const size_t n = strlen(line);
-    const size_t head = n > 40 ? 40 : n;
-    memcpy(first, line, head);
-    first[head] = '\0';
-    SerialPoke::inject(Serial1, first);
-    gNow += 2;
-    loopPass(gNow, kNone, kNone);
-    w.add(gLast);
-    SerialPoke::inject(Serial1, line + head);
-    SerialPoke::inject(Serial1, "\r");
+    BudgetLine b;
+    budgetSplit(line, b);
+    injectBudget(b, w, gNow);
     settle(gNow, &w);
     recordPass(what, w);
 }

@@ -86,32 +86,36 @@ void injectLine(PGM_P body) {
 // The most a pass reads: one full read budget, shared by both ports. Labels say "32 bytes".
 static_assert(Runtime::kMaxBytesPerPass == 32, "the timing labels say a full read budget is 32 bytes");
 
-// A request (with its CRC) arranged so that a full read budget ends with its CR: the most a pass
-// reads, completing the line at its last byte. `lead` is what has to arrive, and be read, in an
-// earlier pass (the line's first bytes, when the line and its CR are longer than the budget);
-// `budget` is the Runtime::kMaxBytesPerPass bytes after it (other traffic, ended by a CR, first
-// when the line is shorter).
+// A request arranged so that a full read budget ends with its CR: the most a pass reads, completing
+// the line at its last byte. `lead` is what has to arrive, and be read, in earlier passes (the line's
+// first bytes, when the line and its CR are longer than the budget); `budget` is the
+// Runtime::kMaxBytesPerPass bytes after it (other traffic, ended by a CR, first when the line is
+// shorter).
 struct BudgetLine {
     char lead[LineReader::kMaxLen + 2];
     char budget[Runtime::kMaxBytesPerPass + 1];
 };
-void budgetLine(PGM_P body, BudgetLine &b) {
-    crcLine(body);
-    const uint8_t n = static_cast<uint8_t>(strlen(gLine) + 1);  // with the CR
+// `line` as it is (in RAM, without its CR).
+void budgetSplit(const char *line, BudgetLine &b) {
+    const uint8_t n = static_cast<uint8_t>(strlen(line) + 1);  // with the CR
     constexpr uint8_t B = Runtime::kMaxBytesPerPass;
     if (n >= B) {
         const uint8_t head = static_cast<uint8_t>(n - B);
-        memcpy(b.lead, gLine, head);
+        memmove(b.lead, line, head);
         b.lead[head] = '\0';
-        memcpy(b.budget, gLine + head, B - 1);
+        memmove(b.budget, line + head, B - 1);
     } else {
         b.lead[0] = '\0';
         memset(b.budget, 'j', B - n);
         b.budget[B - n - 1] = '\r';
-        memcpy(b.budget + (B - n), gLine, n - 1);
+        memmove(b.budget + (B - n), line, n - 1);
     }
     b.budget[B - 1] = '\r';
     b.budget[B] = '\0';
+}
+// `body` (a flash string) with its CRC.
+void budgetLine(PGM_P body, BudgetLine &b) {
+    budgetSplit(crcLine(body), b);
 }
 
 // The worst state, the reply route at its longest (HELLO 20) and EVENTS on, so every press also
@@ -177,6 +181,20 @@ uint16_t loopPass(uint32_t now, const PadState &foot, const PadState &dome, uint
                              Runtime::Link<HardwareSerial>{Serial, usbLines, usbPort}, SMT_WCB_UART);
     });
     return gLast.total();
+}
+
+// Puts `b` in Serial1's RX buffer: its lead, read by passes with nothing held (into `w`), then the
+// full budget ending the line, for the next pass to read.
+void injectBudget(const BudgetLine &b, WorstPass &w, uint32_t &now) {
+    SerialPoke::inject(Serial1, b.lead);
+    for (uint8_t i = 0; i < 4 && SMT_WCB_UART.available() > 0; ++i) {
+        now += 2;
+        loopPass(now, kNone, kNone);
+        w.add(gLast);
+    }
+    TEST_ASSERT_EQUAL_INT(0, SMT_WCB_UART.available());
+    TEST_ASSERT_FALSE(wcbLines.ready());
+    SerialPoke::inject(Serial1, b.budget);
 }
 
 // The worst passes of a scenario with at most one press a pass, by class: a press fired while the

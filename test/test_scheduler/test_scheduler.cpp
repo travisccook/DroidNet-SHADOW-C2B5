@@ -163,8 +163,8 @@ static void test_one_request_a_pass_over_both_ports() {
     TEST_ASSERT_EQUAL_UINT32(1, rig->usb.log.count);
 }
 
-// One 64-byte read budget a pass, shared by both ports: 64 junk bytes on the WCB leave the USB port
-// nothing, so its request is read (and handled) on a later pass.
+// One read budget a pass (Runtime::kMaxBytesPerPass), shared by both ports: a full budget of junk
+// on the WCB leaves the USB port nothing, so its request is read (and handled) on a later pass.
 static void test_both_ports_share_one_read_budget() {
     char junk[Runtime::kMaxBytesPerPass + 1];
     memset(junk, 'j', Runtime::kMaxBytesPerPass);
@@ -179,6 +179,36 @@ static void test_both_ports_share_one_read_budget() {
     expectWork(Runtime::Work::Request, pass());
     TEST_ASSERT_EQUAL_UINT32(0, rig->usbIn.unread());
     TEST_ASSERT_EQUAL_UINT32(1, rig->usb.log.count);
+}
+
+// A request arriving as a write's verify-and-finish step comes due: its pass handles the request and
+// the finishing step waits one pass (so the two never share a pass); the write still finishes and its
+// reply still goes out.
+static void test_a_request_pass_puts_off_a_writes_finishing_step() {
+    rig->wcbIn.addLine("@SM HELLO");
+    expectWork(Runtime::Work::Request, pass());
+    expectWork(Runtime::Work::Background, pass());
+    rig->wcbIn.addLine("@SM SET F NONE DOWN abc");  // 34 bytes: two passes to read
+    expectWork(Runtime::Work::Background, pass());
+    expectWork(Runtime::Work::Request, pass());
+    for (uint16_t i = 0; i < 200 && !(rig->store.finishDue() && rig->eeprom.ready()); ++i)
+        expectWork(Runtime::Work::Background, pass());
+    TEST_ASSERT_TRUE(rig->store.finishDue());
+    TEST_ASSERT_TRUE(rig->eeprom.ready());  // the step could finish the write this pass
+    rig->wcbIn.addLine("@SM GET F NONE UP");
+    expectWork(Runtime::Work::Request, pass());
+    TEST_ASSERT_EQUAL_UINT32(0, rig->wcbIn.unread());
+    TEST_ASSERT_TRUE(piSawRecently("@SM SLOT F NONE UP fup "));
+    TEST_ASSERT_TRUE(rig->store.finishDue());  // put off
+    expectWork(Runtime::Work::Background, pass());
+    TEST_ASSERT_FALSE(rig->store.finishDue());  // finished in the next pass
+    for (uint8_t i = 0; i < 10; ++i)
+        pass();
+    TEST_ASSERT_FALSE(rig->store.busy());
+    TEST_ASSERT_TRUE(piSawRecently("@SM OK SET F NONE DOWN abc"));
+    char key[kKeyBuf];
+    TEST_ASSERT_TRUE(rig->store.keyForSlot(slotIndex(Ctrl::F, Mod::NONE, Btn::DOWN), key));
+    TEST_ASSERT_EQUAL_STRING("abc", key);
 }
 
 // A DUMP keeps the queue busy while GETs come in one at a time (the Pi waits for each reply): both
@@ -273,6 +303,7 @@ int runAllTests() {
     RUN_TEST(test_a_press_doesnt_cancel_the_background_unit_it_owes);
     RUN_TEST(test_one_request_a_pass_over_both_ports);
     RUN_TEST(test_both_ports_share_one_read_budget);
+    RUN_TEST(test_a_request_pass_puts_off_a_writes_finishing_step);
     RUN_TEST(test_a_dump_and_gets_both_finish);
     RUN_TEST(test_the_battery_report_still_goes_out_after_a_dump);
     RUN_TEST(test_a_faulted_pass_follows_the_rule);

@@ -39,7 +39,9 @@ class Runtime {
     // At 9600 baud about 1 byte arrives a millisecond, so 32 a pass still empties the UART's 64-byte
     // RX buffer far faster than it fills; a request longer than 32 bytes takes one more pass to read.
     // 64 left the worst read pass (a full budget ending a GET of v4's 93-character SLOT line,
-    // answered) about 11 us under 1 ms on the emulated ATmega2560.
+    // answered) about 11 us under 1 ms on the emulated ATmega2560. A request held because it can't
+    // be answered yet counts as its pass's request, so while it waits the discard path drops at most
+    // 32 bytes every other pass: at 9600 baud the RX buffer only overflows if passes take over ~16 ms.
     static constexpr uint8_t kMaxBytesPerPass = 32;
     static constexpr uint32_t kDeferMaxMs = 250;  // a deferred press older than this is dropped
     static constexpr uint16_t kDoubleTapMs = 350;  // default window from the first press to the second
@@ -158,9 +160,12 @@ class Runtime {
     void background(uint32_t nowMs, bool mayAnnounce);
 
     // Every pass, faults included: the EEPROM writer's step, then queued bytes to the WCB's UART.
+    // With `handledRequest`, a writer's verify-and-finish step (MapStore::finishDue()) waits for the
+    // next pass, so a request answered in this pass doesn't meet it; its other steps don't wait.
     template <class Out>
-    void finishPass(Out &wcb) {
-        store_.step();
+    void finishPass(Out &wcb, bool handledRequest = false) {
+        if (!(handledRequest && store_.finishDue()))
+            store_.step();
         tx_.drain(wcb);
     }
 
@@ -179,7 +184,9 @@ class Runtime {
     //   - any other pass handles at most one request (WCB first, then USB) and, if it handled none,
     //     runs the background unit; both ports share one kMaxBytesPerPass read budget a pass (USB
     //     gets what the WCB left), so the reads are bounded whatever arrives;
-    // then finishPass() into `wcbOut`, every pass. No unit waits more than one pass for another.
+    // then finishPass() into `wcbOut`, every pass: the EEPROM writer's step (except that a verify-and-
+    // finish step waits a pass when this pass handled a request) and the drain. No unit waits more
+    // than one pass for another.
     template <class WcbIn, class UsbIn, class Out>
     void afterButtons(uint32_t nowMs, bool fired, bool faulted, Link<WcbIn> wcb, Link<UsbIn> usb, Out &wcbOut) {
         if (faulted)
@@ -198,7 +205,7 @@ class Runtime {
             background(nowMs, !faulted);
             lastWork_ = Work::Background;
         }
-        finishPass(wcbOut);
+        finishPass(wcbOut, lastWork_ == Work::Request);
     }
 
   private:
