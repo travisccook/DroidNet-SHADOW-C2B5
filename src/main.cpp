@@ -273,8 +273,6 @@ void mappedButtons() {
     output += fired.key[0] != '\0' ? fired.key : "(unmapped)";
     if (fired.modFromOther)
         output += " (modifier held on the other controller)";
-    if (fired.key[0] != '\0' && !fired.queued)
-        output += " [WCB queue full, dropped]";
     output += "\r\n";
 #endif
 }

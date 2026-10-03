@@ -17,6 +17,11 @@ class TxQueue {
     uint8_t used() const { return used_; }
     uint8_t freeSpace() const { return static_cast<uint8_t>(kCapacity - used_); }
 
+    // While a button command waits for room (sm::Runtime), replies, events and the announce stay
+    // out of the queue so the drain frees room for it. pushCommand() ignores the hold.
+    void holdForCommand(bool on) { held_ = on; }
+    bool heldForCommand() const { return held_; }
+
     // Queues the concatenation of `parts` (NUL-terminated strings, at most kMaxParts) followed
     // by '\r', or nothing if it doesn't all fit.
     static constexpr uint8_t kMaxParts = 4;
@@ -55,6 +60,7 @@ class TxQueue {
     uint8_t head_ = 0;  // next byte to send
     uint8_t tail_ = 0;  // next free byte
     uint8_t used_ = 0;
+    bool held_ = false;
 };
 
 // Room always kept free for one button command (prefix + key + suffix + '\r'), so replies,

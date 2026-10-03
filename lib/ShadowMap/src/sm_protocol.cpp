@@ -161,6 +161,8 @@ void slotRest(Out &out, const MapStore &store, uint8_t slot, const char *key, So
 // WcbPort
 
 bool WcbPort::canSend(uint8_t len) {
+    if (tx_.heldForCommand())
+        return false;  // a button command is waiting for room
     // Sized for the longest route so a HELLO that lengthens it can't break the headroom.
     const uint16_t framed = static_cast<uint16_t>(kMaxRouteLen + len + 1);
     return tx_.freeSpace() >= framed + kCommandHeadroom;

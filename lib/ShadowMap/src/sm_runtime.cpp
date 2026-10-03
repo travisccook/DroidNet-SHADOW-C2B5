@@ -8,20 +8,27 @@ namespace sm {
 
 bool Runtime::buttons(uint32_t nowMs, const PadState &foot, const PadState &dome, FiredPress *fired) {
     protocol_.setPads(foot.connected, dome.connected);
+    firesThisPass_ = 0;
     bool any = false;
-    if (deferredSlot_ != kNoSlot) {
-        // Only while it's still fresh and its controller is still there (a fault can hold up
-        // the passes in between).
-        const PadState &pad = slotCtrl(deferredSlot_) == Ctrl::F ? foot : dome;
-        if (!pad.connected || nowMs - deferredAt_ > kDeferMaxMs) {
-            deferredSlot_ = kNoSlot;
-        } else if (fire(deferredSlot_, deferredFromOther_, fired)) {
-            deferredSlot_ = kNoSlot;
+    // Presses that waited, oldest first. One that still can't go keeps its place, and so does
+    // everything behind it. Only while still fresh and its controller is still there (a fault can
+    // hold up the passes in between).
+    uint8_t kept = 0;
+    for (uint8_t i = 0; i < deferredCount_; ++i) {
+        const Deferred d = deferred_[i];
+        const PadState &pad = slotCtrl(d.slot) == Ctrl::F ? foot : dome;
+        if (!pad.connected || nowMs - d.at > kDeferMaxMs)
+            continue;  // dropped
+        if (kept == 0 && fire(d.slot, d.fromOther, fired)) {
             any = true;
+            continue;
         }
+        deferred_[kept++] = d;
     }
+    deferredCount_ = kept;
     any = handlePad(Ctrl::D, dome, foot, nowMs, fired) || any;
     any = handlePad(Ctrl::F, foot, dome, nowMs, fired) || any;
+    tx_.holdForCommand(deferredCount_ > 0);
     return any;
 }
 
@@ -147,29 +154,39 @@ bool Runtime::legacy(uint8_t slot, bool fromOther, uint32_t nowMs, FiredPress *f
 }
 
 bool Runtime::fireOrDefer(uint8_t slot, bool modFromOther, uint32_t nowMs, FiredPress *fired) {
-    if (fire(slot, modFromOther, fired))
+    if (deferredCount_ == 0 && fire(slot, modFromOther, fired))
         return true;
-    deferredSlot_ = slot;  // EEPROM mid-write: send it next pass
-    deferredFromOther_ = modFromOther;
-    deferredAt_ = nowMs;
+    defer(slot, modFromOther, nowMs);  // behind any press already waiting
     return false;
 }
 
+void Runtime::defer(uint8_t slot, bool modFromOther, uint32_t nowMs) {
+    if (deferredCount_ == kMaxDeferred) {
+        ++droppedPresses_;  // eight presses already waiting: more than two controllers can produce
+        return;
+    }
+    deferred_[deferredCount_++] = {slot, modFromOther, nowMs};
+}
+
+// Sends a press: its command (if its slot maps to one) and its PRESS event. False, sending nothing,
+// when it can't go this pass: kMaxFiresPerPass already fired, the EEPROM is mid-write and the slot has
+// to be read, or the command doesn't fit in the TX queue.
 bool Runtime::fire(uint8_t slot, bool modFromOther, FiredPress *fired) {
+    if (firesThisPass_ >= kMaxFiresPerPass)
+        return false;
     char key[kKeyBuf];
     Source src = Source::Default;
     if (!store_.keyForSlot(slot, key, &src))
         return false;
-    bool queued = false;
-    if (key[0] != '\0')
-        queued = pushCommand(tx_, store_.prefix(), key, store_.suffix());
+    if (key[0] != '\0' && !pushCommand(tx_, store_.prefix(), key, store_.suffix()))
+        return false;
+    ++firesThisPass_;
     protocol_.notifyPress(slot, key, src, modFromOther);
     if (fired != nullptr) {
         fired->slot = slot;
         memcpy(fired->key, key, kKeyBuf);
         fired->src = src;
         fired->modFromOther = modFromOther;
-        fired->queued = queued;
     }
     return true;
 }
@@ -205,7 +222,7 @@ void Runtime::announce(uint32_t nowMs) {
         return;
     }
     const uint8_t len = static_cast<uint8_t>(kAnnounceHeadLen + fwLen + 2);
-    if (tx_.freeSpace() < len + 1 + kCommandHeadroom)
+    if (tx_.heldForCommand() || tx_.freeSpace() < len + 1 + kCommandHeadroom)
         return;  // busy right now; try again next pass
     memcpy_P(line, kAnnounceHead, kAnnounceHeadLen);
     memcpy(line + kAnnounceHeadLen, announceFw_, fwLen);

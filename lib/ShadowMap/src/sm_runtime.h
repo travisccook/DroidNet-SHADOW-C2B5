@@ -20,7 +20,6 @@ struct FiredPress {
     char key[kKeyBuf];  // "" = unmapped
     Source src;
     bool modFromOther;  // the modifier was held on the other controller
-    bool queued;        // false only if the command didn't fit in the TX queue (shouldn't happen)
 };
 
 class Runtime {
@@ -39,6 +38,8 @@ class Runtime {
     static constexpr uint32_t kDeferMaxMs = 250;  // a deferred press older than this is dropped
     static constexpr uint16_t kDoubleTapMs = 350;  // default window from the first press to the second
     static constexpr uint16_t kLongPressMs = 600;  // default hold for a long press
+    static constexpr uint8_t kMaxDeferred = 8;      // presses waiting to fire (see buttons())
+    static constexpr uint8_t kMaxFiresPerPass = 3;  // presses fired in one pass; more wait a pass, in order
 
     // `announceFw` is the firmware version for the WCB device announce ("@WDP1 {...}");
     // nullptr turns the announce off. It starts with startAnnounce(). `doubleTapMs` is how
@@ -63,18 +64,29 @@ class Runtime {
     const BatteryWatch &footBattery() const { return footBattery_; }
     const BatteryWatch &domeBattery() const { return domeBattery_; }
 
-    // Once per pass, after the controllers have been read: the dome controller, then the foot,
-    // as the old code did. A combo fires when pressed and again every second while held; the
-    // repeat timer is shared by both controllers. A combo whose double tap or long press is mapped waits
-    // instead (see WIPDocs/COMMAND_MAPPING_DESIGN.md, Double taps and Long presses): a second press within
-    // the window fires the double tap, a hold to the threshold fires the long press, anything
-    // else fires the combo itself: late, or on release if it has a long press. Returns true,
-    // filling `fired`, when a combo fired this pass.
+    // Once per pass, after the controllers have been read: presses that waited, oldest first, then the
+    // dome controller, then the foot, as the old code did. A combo fires when pressed and again every
+    // second while held; the repeat timer is shared by both controllers. A combo whose double tap or long
+    // press is mapped waits instead (see WIPDocs/COMMAND_MAPPING_DESIGN.md, Double taps and Long presses).
+    // A press that can't fire yet (the EEPROM mid-write, no room in the TX queue for its command, or
+    // kMaxFiresPerPass already fired this pass) waits, in order, and fires on a later pass; it is dropped
+    // only if its controller has gone or it is more than kDeferMaxMs old. While one waits, the TX queue
+    // takes no replies (TxQueue::holdForCommand). Returns true, filling `fired` with the last, when a
+    // press fired this pass.
     bool buttons(uint32_t nowMs, const PadState &foot, const PadState &dome, FiredPress *fired);
 
     // True while a first tap waits to see whether a second one follows, or a held combo with a
     // long press waits to be released or held long enough.
     bool tapPending() const { return taps_[0].pending != kNoSlot || taps_[1].pending != kNoSlot; }
+
+    // A pass in which readUSB() reported a fault (buttons() isn't called): no press can fire, so the
+    // TX queue isn't held for one. Presses still waiting are dropped by buttons() once they are old.
+    void faultPass() { tx_.holdForCommand(false); }
+
+    // Diagnostics, for tests and the timing harness.
+    uint8_t deferredCount() const { return deferredCount_; }
+    uint8_t firesLastPass() const { return firesThisPass_; }
+    uint16_t droppedPresses() const { return droppedPresses_; }  // the waiting list was full (never expected)
 
     // Reads @SM requests from `port` without blocking, at most kMaxBytesPerPass bytes a pass.
     // A request that can't be answered yet (reply queue full, EEPROM busy) stays in `reader`
@@ -157,6 +169,7 @@ class Runtime {
     bool legacy(uint8_t slot, bool fromOther, uint32_t nowMs, FiredPress *fired);
     bool fireOrDefer(uint8_t slot, bool modFromOther, uint32_t nowMs, FiredPress *fired);
     bool fire(uint8_t slot, bool modFromOther, FiredPress *fired);
+    void defer(uint8_t slot, bool modFromOther, uint32_t nowMs);
     void announce(uint32_t nowMs);
     void reportBattery(uint32_t nowMs);
     uint32_t between(uint32_t lo, uint32_t hi);  // pseudo-random, lo..hi inclusive
@@ -171,9 +184,15 @@ class Runtime {
     PadTaps taps_[kCtrlCount];
     uint32_t repeatStart_ = 0;
     uint16_t repeatCount_ = 0;
-    uint8_t deferredSlot_ = kNoSlot;  // pressed while the EEPROM was mid-write
-    bool deferredFromOther_ = false;
-    uint32_t deferredAt_ = 0;
+    struct Deferred {
+        uint8_t slot;
+        bool fromOther;
+        uint32_t at;  // when it first tried to fire
+    };
+    Deferred deferred_[kMaxDeferred];
+    uint8_t deferredCount_ = 0;
+    uint8_t firesThisPass_ = 0;
+    uint16_t droppedPresses_ = 0;
     bool announcing_ = false;
     uint32_t nextAnnounce_ = 0;
     uint32_t rng_ = 1;

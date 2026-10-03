@@ -37,7 +37,6 @@ static void test_button_presses() {
     TEST_ASSERT_EQUAL_UINT8(kWide, gFired.slot);
     TEST_ASSERT_EQUAL_STRING(kDef15, gFired.key);
     TEST_ASSERT_TRUE(gFired.modFromOther);
-    TEST_ASSERT_TRUE(gFired.queued);
     drainAll();
     TEST_ASSERT_EQUAL_UINT8(8 + 66, null.longest);
     record(PSTR("buttons(): long press fires (command + PRESS F CIRCLE RIGHTL ... from=D)"), t, kT1,
@@ -123,8 +122,9 @@ static void test_button_presses() {
     TEST_ASSERT_TRUE(gAny);
     TEST_ASSERT_EQUAL_UINT8(kWide, gFired.slot);
     drainAll();
-    // Both commands, and the first press's PRESS line (the second's waits for room: dropped).
-    TEST_ASSERT_EQUAL_UINT16(3, null.lines - linesBefore);
+    // Both commands; no PRESS lines: the deferred press held the TX queue against events until this
+    // pass ended (TxQueue::holdForCommand), and events are best effort.
+    TEST_ASSERT_EQUAL_UINT16(2, null.lines - linesBefore);
     record(PSTR("buttons(): a deferred press and a long press in one pass"), t, kT2);
     io.busyPasses = 0;
     for (uint16_t i = 0; i < 200 && store.busy(); ++i)

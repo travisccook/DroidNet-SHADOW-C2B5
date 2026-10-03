@@ -195,6 +195,20 @@ static void test_command_headroom_fits_the_longest_command() {
     TEST_ASSERT_EQUAL_UINT8(0, q.freeSpace());
 }
 
+// While a button command waits for room, the WCB port takes no replies; the command itself still
+// goes in (pushCommand ignores the hold, as it ignores the headroom).
+static void test_hold_keeps_replies_out() {
+    sm::TxQueue tx;
+    sm::WcbPort port(tx);
+    TEST_ASSERT_TRUE(port.canSend(10));
+    tx.holdForCommand(true);
+    TEST_ASSERT_TRUE(tx.heldForCommand());
+    TEST_ASSERT_FALSE(port.canSend(10));
+    TEST_ASSERT_TRUE(sm::pushCommand(tx, ";W1;C", "key", ""));
+    tx.holdForCommand(false);
+    TEST_ASSERT_TRUE(port.canSend(10));
+}
+
 int runAllTests() {
     UNITY_BEGIN();
     RUN_TEST(test_reader_keeps_only_sm_lines);
@@ -205,5 +219,6 @@ int runAllTests() {
     RUN_TEST(test_queue_is_all_or_nothing);
     RUN_TEST(test_queue_wraps_and_drains_at_uart_speed);
     RUN_TEST(test_command_headroom_fits_the_longest_command);
+    RUN_TEST(test_hold_keeps_replies_out);
     return UNITY_END();
 }
