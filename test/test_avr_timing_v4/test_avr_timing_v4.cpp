@@ -1,7 +1,7 @@
 // Raw commands (@SM v4) at their longest, whole loop passes (see test/support/sm_avr_timing.h for
 // the method and the classes): a GET of the 93-character SLOT line (15 raw characters over a
-// 15-character default on F CIRCLE RIGHTL), the worst read with it (63 RX bytes ending the GET,
-// answered in that pass), DUMP and SUM over raw records, a SET of 15 raw bytes (and the first
+// 15-character default on F CIRCLE RIGHTL), the worst read with it (a full read budget ending the
+// GET, answered in that pass), DUMP and SUM over raw records, a SET of 15 raw bytes (and the first
 // write), raw presses through Runtime with the 80- and 81-character PRESS lines (one, two, three
 // due in a pass, with a write's last step), and a raw SET arriving as a raw press fires.
 // AVR only (simavr).
@@ -101,23 +101,20 @@ static void test_raw_slot_lines() {
 
     intake(PSTR("v4 GET passes: raw on F CIRCLE RIGHTL, 93-char SLOT line"), PSTR("@SM GET F CIRCLE RIGHTL"));
 
-    // The worst read with v4: 63 bytes in Serial1's RX buffer, the end of other traffic and then
-    // the GET, taken and answered in one pass, with the drain; in the same pass both controllers'
-    // battery levels change (CRIT, first seen kFirstMs earlier).
+    // The worst read with v4: a full read budget whose last byte ends the GET (its first bytes were
+    // read in an earlier pass), taken and answered in one pass, with the drain; in the same pass
+    // both controllers' battery levels change (CRIT, first seen kFirstMs earlier).
     settle(gNow);
     loopPass(gNow += 2, kNone, kNone, 1, 1);
     settle(gNow);
     gNow += BatteryWatch::kFirstMs;
-    char junk[40];
-    crcLine(PSTR("@SM GET F CIRCLE RIGHTL"));
-    const uint8_t getLen = static_cast<uint8_t>(strlen(gLine) + 1);
-    memset(junk, 'j', 63 - getLen);
-    junk[63 - getLen - 1] = '\r';
-    junk[63 - getLen] = '\0';
-    SerialPoke::inject(Serial1, junk);
-    SerialPoke::inject(Serial1, gLine);
-    SerialPoke::inject(Serial1, "\r");
-    TEST_ASSERT_EQUAL_INT(63, Serial1.available());
+    BudgetLine get;
+    budgetLine(PSTR("@SM GET F CIRCLE RIGHTL"), get);
+    SerialPoke::inject(Serial1, get.lead);
+    loopPass(gNow += 2, kNone, kNone);
+    TEST_ASSERT_TRUE(runtime.lastWork() == Runtime::Work::Background);  // no request yet
+    SerialPoke::inject(Serial1, get.budget);
+    TEST_ASSERT_EQUAL_INT(Runtime::kMaxBytesPerPass, Serial1.available());
     WorstPass w;
     const uint8_t before = tx.used();
     loopPass(gNow += 2, kNone, kNone, 1, 1);
@@ -129,26 +126,26 @@ static void test_raw_slot_lines() {
     TEST_ASSERT_EQUAL_INT16(kRoute + 93 + 1, queuedBy(before));  // the 93-char SLOT line
     w.add(gLast);
     settle(gNow);
-    recordPass(PSTR("v4 loop pass: 63 RX bytes ending a raw GET, 93-char SLOT answered, + battery change + drain"),
-               w);
+    recordPass(
+        PSTR("v4 loop pass: full budget (32 bytes) ending a raw GET, 93-char SLOT answered, + battery change + drain"),
+        w);
 
-    // pump() alone with the same 63 bytes (the read and the answer), then drain() alone (the
-    // reply's first 64 bytes). Calling them here also keeps this program's code the slower shape:
-    // called from more than one place, Runtime::pump<Uart1> and TxQueue::drain<Uart1> are emitted
-    // out of line, and the loop pass above costs about 50 us more than with both inlined into
-    // afterButtons() (the firmware's shape today, and this program's without these calls: 934 us
-    // without the battery change). test_avr_timing_runtime has the slower shape too, and so does
-    // the figure above.
-    SerialPoke::inject(Serial1, junk);
-    SerialPoke::inject(Serial1, gLine);
-    SerialPoke::inject(Serial1, "\r");
+    // pump() alone with the same bytes (the read and the answer), then drain() alone (the reply's
+    // first 64 bytes). Calling them here also keeps this program's code the slower shape: called
+    // from more than one place, Runtime::pump<Uart1> and TxQueue::drain<Uart1> are emitted out of
+    // line, and the loop pass above costs about 50 us more than with both inlined into
+    // afterButtons() (the firmware's shape today, and this program's without these calls).
+    // test_avr_timing_runtime has the slower shape too, and so does the figure above.
+    SerialPoke::inject(Serial1, get.lead);
+    TEST_ASSERT_FALSE(runtime.pump(SMT_WCB_UART, wcbLines, port));
+    SerialPoke::inject(Serial1, get.budget);
     drainAll();
     bool took = false;
     uint16_t t = ticksOf([&] { took = runtime.pump(SMT_WCB_UART, wcbLines, port); });
     TEST_ASSERT_TRUE(took);
     TEST_ASSERT_EQUAL_INT(0, Serial1.available());
     TEST_ASSERT_EQUAL_UINT8(kRoute + 93 + 1, tx.used());
-    record(PSTR("v4 pump(): 63 bytes ending a raw GET, its 93-char SLOT queued"), t);
+    record(PSTR("v4 pump(): full budget (32 bytes) ending a raw GET, its 93-char SLOT queued"), t);
     SerialPoke::dropTx1();
     t = ticksOf([] { tx.drain(SMT_WCB_UART); });
     TEST_ASSERT_EQUAL_UINT8(kRoute + 93 + 1 - 64, tx.used());

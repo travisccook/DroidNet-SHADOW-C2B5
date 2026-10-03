@@ -196,34 +196,39 @@ static void test_line_input() {
     TEST_ASSERT_TRUE(ready);
     record(PSTR("LineReader: a 72-char line and its CR (73 feeds)"), t, kPart);
 
-    // pump() from the real Serial1: 63 bytes (all its RX buffer holds) of other traffic.
+    // pump() from the real Serial1: 63 bytes (all its RX buffer holds) of other traffic, of which
+    // it reads a full budget.
     char junk[64];
     memset(junk, 'j', 62);
     junk[62] = '\r';
     junk[63] = '\0';
     SerialPoke::inject(Serial1, junk);
     t = ticksOf([] { runtime.pump(SMT_WCB_UART, wcbLines, port); });
-    TEST_ASSERT_EQUAL_INT(0, Serial1.available());
-    record(PSTR("pump(): 63 bytes of other traffic"), t);
+    TEST_ASSERT_EQUAL_INT(63 - Runtime::kMaxBytesPerPass, Serial1.available());
+    record(PSTR("pump(): a full read budget (32 bytes) of other traffic"), t);
+    SerialPoke::clearRx(Serial1);
+    wcbLines.consume();
 
-    // 63 bytes: the end of other traffic, then the worst GET, all in the RX buffer at once.
-    crcLine(PSTR("@SM GET F CIRCLE RIGHTL"));
-    const uint8_t getLen = static_cast<uint8_t>(strlen(gLine) + 1);
-    memset(junk, 'j', 63 - getLen);
-    junk[63 - getLen - 1] = '\r';
-    junk[63 - getLen] = '\0';
-    SerialPoke::inject(Serial1, junk);
-    SerialPoke::inject(Serial1, gLine);
-    SerialPoke::inject(Serial1, "\r");
+    // A full budget ending the worst GET (its first bytes read by an earlier call).
+    BudgetLine get;
+    budgetLine(PSTR("@SM GET F CIRCLE RIGHTL"), get);
+    SerialPoke::inject(Serial1, get.lead);
+    TEST_ASSERT_FALSE(runtime.pump(SMT_WCB_UART, wcbLines, port));
+    SerialPoke::inject(Serial1, get.budget);
+    TEST_ASSERT_EQUAL_INT(Runtime::kMaxBytesPerPass, Serial1.available());
     drainAll();
-    t = ticksOf([] { runtime.pump(SMT_WCB_UART, wcbLines, port); });
-    record(PSTR("pump(): 63 bytes ending the worst GET"), t);
+    bool answered = false;
+    t = ticksOf([&] { answered = runtime.pump(SMT_WCB_UART, wcbLines, port); });
+    TEST_ASSERT_TRUE(answered);
+    TEST_ASSERT_EQUAL_INT(0, Serial1.available());
+    record(PSTR("pump(): a full read budget (32 bytes) ending the worst GET"), t);
     uint32_t now = 1000;
     settle(now);
 
     // Two requests in the RX buffer at once (a second sender, or a resend landing behind a
-    // request): EVENTS 1 and the worst GET. pump() takes one a call, so they take two passes (the
-    // first one's reply drained between them); the worse of the two.
+    // request): EVENTS 1 and the worst GET. pump() takes one a call and reads a full budget at most,
+    // so the GET (34 bytes with its CR) takes two more calls (the first reply drained between
+    // them); the worst of the calls.
     crcLine(PSTR("@SM EVENTS 1"));
     SerialPoke::inject(Serial1, gLine);
     SerialPoke::inject(Serial1, "\r");
@@ -234,13 +239,20 @@ static void test_line_input() {
     TEST_ASSERT_TRUE(took);
     TEST_ASSERT_TRUE(SMT_WCB_UART.available() > 0);  // the GET waits for the next call
     drainAll();
-    two.add(ticksOf([&] { took = runtime.pump(SMT_WCB_UART, wcbLines, port); }));
+    uint8_t calls = 0;
+    took = false;
+    for (; calls < 4 && !took; ++calls) {
+        two.add(ticksOf([&] { took = runtime.pump(SMT_WCB_UART, wcbLines, port); }));
+        drainAll();
+    }
     TEST_ASSERT_TRUE(took);
+    TEST_ASSERT_EQUAL_UINT8(2, calls);
     TEST_ASSERT_EQUAL_INT(0, SMT_WCB_UART.available());
-    record(PSTR("pump(): two requests in the RX buffer, one a call (EVENTS 1, then the worst GET)"), two.ticks);
+    record(PSTR("pump(): EVENTS 1 then the worst GET in the RX buffer, one a call, worst call"), two.ticks);
     settle(now);
 
-    // A 72-char line split over two passes; the second ends it (bad CRC).
+    // A 72-char line (bad CRC), its first 63 bytes waiting, then the rest: a full budget a call
+    // until the last call ends it.
     memset(body, 'x', 62);
     memcpy(body, "@SM ", 4);
     memcpy(body + 62, " *00000000\r", 12);
@@ -251,8 +263,11 @@ static void test_line_input() {
     Worst w;
     w.add(ticksOf([] { runtime.pump(SMT_WCB_UART, wcbLines, port); }));
     SerialPoke::inject(Serial1, body + 63);
-    w.add(ticksOf([] { runtime.pump(SMT_WCB_UART, wcbLines, port); }));
-    record(PSTR("pump(): worst pass of a 72-char line over two passes (bad CRC)"), w.ticks);
+    for (uint8_t i = 0; i < 4 && SMT_WCB_UART.available() > 0; ++i)
+        w.add(ticksOf([] { runtime.pump(SMT_WCB_UART, wcbLines, port); }));
+    TEST_ASSERT_EQUAL_INT(0, SMT_WCB_UART.available());
+    TEST_ASSERT_EQUAL_UINT16(3, w.passes);
+    record(PSTR("pump(): worst call of a 72-char line read 32 bytes a call (bad CRC)"), w.ticks);
     settle(now);
 }
 
@@ -358,8 +373,8 @@ static void test_loop_passes() {
     recordPass(PSTR("loop pass: DUMP (worst slot) + battery and announce due + drain"), w);
 
     // The same, with 63 bytes of other traffic (no CR, so no @SM line completes) on Serial1 and on
-    // Serial every pass: the two ports share one 64-byte read budget, so the pass reads 64 bytes
-    // and still runs the background unit.
+    // Serial every pass: the two ports share one read budget, so the pass reads 32 bytes (all from
+    // Serial1) and still runs the background unit.
     worstState();
     settle(now);
     drainAll();
@@ -381,7 +396,7 @@ static void test_loop_passes() {
         w.add(gLast);
     }
     TEST_ASSERT_FALSE(protocol.opInProgress());
-    recordPass(PSTR("loop pass: 63 junk bytes on each port + background unit (DUMP line, battery and announce due) + drain"), w);
+    recordPass(PSTR("loop pass: 63 junk bytes a port, 32 read + background (DUMP, battery, announce) + drain"), w);
     SerialPoke::clearRx(Serial1);
     SerialPoke::clearRx(Serial);
 
@@ -477,32 +492,36 @@ int16_t queuedBy(uint8_t before) {
 static void test_after_a_request() {
     Serial1.begin(9600);
 
-    // The worst read: 63 bytes in Serial1's RX buffer, the end of other traffic and then the worst
-    // GET (a 15-char key over a 15-char default), taken and answered in one pass, with the drain.
+    // The worst read: a full read budget whose last byte ends the worst GET (a 15-char key over a
+    // 15-char default; its first bytes were read in an earlier pass), taken and answered in one
+    // pass, with the drain; in the same pass both controllers' battery levels change (CRIT, first
+    // seen kFirstMs earlier).
     worstState();
     eeSlot(kWide, kGen, kKey15);
     uint32_t now = 700000UL;
     settle(now);
-    char junk[40];
-    crcLine(PSTR("@SM GET F CIRCLE RIGHTL"));
-    const uint8_t getLen = static_cast<uint8_t>(strlen(gLine) + 1);
-    memset(junk, 'j', 63 - getLen);
-    junk[63 - getLen - 1] = '\r';
-    junk[63 - getLen] = '\0';
-    SerialPoke::inject(Serial1, junk);
-    SerialPoke::inject(Serial1, gLine);
-    SerialPoke::inject(Serial1, "\r");
-    TEST_ASSERT_EQUAL_INT(63, Serial1.available());
+    loopPass(now += 2, kNone, kNone, 1, 1);
+    settle(now);
+    now += BatteryWatch::kFirstMs;
+    BudgetLine get;
+    budgetLine(PSTR("@SM GET F CIRCLE RIGHTL"), get);
+    SerialPoke::inject(Serial1, get.lead);
+    loopPass(now += 2, kNone, kNone);
+    TEST_ASSERT_TRUE(runtime.lastWork() == Runtime::Work::Background);  // no request yet
+    SerialPoke::inject(Serial1, get.budget);
+    TEST_ASSERT_EQUAL_INT(Runtime::kMaxBytesPerPass, Serial1.available());
     WorstPass w;
     uint8_t before = tx.used();
-    loopPass(now += 2, kNone, kNone);
+    loopPass(now += 2, kNone, kNone, 1, 1);
     TEST_ASSERT_TRUE(runtime.lastWork() == Runtime::Work::Request);
+    TEST_ASSERT_TRUE(runtime.footBattery().level() == BattLevel::Crit);
+    TEST_ASSERT_TRUE(runtime.domeBattery().level() == BattLevel::Crit);
     TEST_ASSERT_FALSE(wcbLines.ready());
     TEST_ASSERT_EQUAL_INT(0, Serial1.available());
-    TEST_ASSERT_TRUE(queuedBy(before) >= 80);  // the 77-char reply
+    TEST_ASSERT_EQUAL_INT16(8 + 77 + 1, queuedBy(before));  // the 77-char reply
     w.add(gLast);
     settle(now);
-    recordPass(PSTR("loop pass: 63 RX bytes ending the worst GET, answered, + drain"), w);
+    recordPass(PSTR("loop pass: full budget (32 bytes) ending the worst GET, answered, + battery change + drain"), w);
 
     // The battery report (CRIT/CRIT, 7-digit up=) comes due in the pass a GET is taken: it goes in
     // the next pass, the one owed to the background unit.
@@ -517,9 +536,12 @@ static void test_after_a_request() {
     TEST_ASSERT_EQUAL_UINT8(0, tx.used());
     runtime.startBattery(port, t);  // the next report kBatteryFirstMs from now
     t += kBatteryFirstMs - 2;
-    loopPass(t, kNone, kNone, 1, 1);  // not due yet
+    BudgetLine get2;
+    budgetLine(PSTR("@SM GET F CIRCLE RIGHTL"), get2);
+    SerialPoke::inject(Serial1, get2.lead);
+    loopPass(t, kNone, kNone, 1, 1);  // not due yet; the GET's first bytes read
     TEST_ASSERT_EQUAL_UINT8(0, tx.used());
-    injectLine(PSTR("@SM GET F CIRCLE RIGHTL"));
+    SerialPoke::inject(Serial1, get2.budget);
     loopPass(t += 2, kNone, kNone, 1, 1);  // due: the GET goes first
     TEST_ASSERT_TRUE(runtime.lastWork() == Runtime::Work::Request);
     // The GET's reply leaves the queue before the owed pass, so that pass has room for the report

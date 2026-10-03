@@ -122,7 +122,7 @@ static Entry gEntries[kMaxEntries];
 static uint8_t gEntryCount = 0;
 
 inline void say(PGM_P fmt, ...) {
-    char msg[112];
+    char msg[136];  // the longest TIMING line, label and all
     va_list ap;
     va_start(ap, fmt);
     vsnprintf_P(msg, sizeof(msg), fmt, ap);

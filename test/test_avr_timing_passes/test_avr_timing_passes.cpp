@@ -1,7 +1,7 @@
 // Whole loop() passes of the mapping, one heavy unit each (T1, see test/support/sm_avr_timing.h):
 // every request taken in from the real Serial1, every line the protocol sends, every slot DUMP or
 // SUM reads, one press fired (every kind, with and without its PRESS line, with the EEPROM writer
-// idle or mid-write), 64 bytes read from each port, and requests that arrive as a press fires.
+// idle or mid-write), a full read budget of other traffic, and requests that arrive as a press fires.
 // Each figure is the worst pass of its scenario, from the request's arrival until the mapping
 // has nothing left to do. AVR only (simavr).
 #include <unity.h>
@@ -285,7 +285,8 @@ static void test_one_press() {
         recordPass(PSTR("press pass: single with PRESS as a SET finishes"), w.t2, kT2);
 }
 
-// 63 bytes (all the RX buffer holds) on each port in one pass.
+// 63 bytes (all the RX buffer holds) waiting on a port, or on each: a pass reads one full budget
+// (32 bytes), shared by both ports.
 static void test_rx() {
     worstState();
     settle(gNow);
@@ -297,21 +298,33 @@ static void test_rx() {
     SerialPoke::inject(Serial1, junk);
     gNow += 2;
     loopPass(gNow, kNone, kNone);
+    TEST_ASSERT_EQUAL_INT(63 - Runtime::kMaxBytesPerPass, Serial1.available());
     w.add(gLast);
-    recordPass(PSTR("RX pass: 63 bytes of other traffic on Serial1"), w);
+    recordPass(PSTR("RX pass: 63 bytes of other traffic waiting on Serial1, 32 read"), w);
+    SerialPoke::clearRx(Serial1);
+    wcbLines.consume();
     w = WorstPass();
     SerialPoke::inject(Serial, junk);
     gNow += 2;
     loopPass(gNow, kNone, kNone);
+    TEST_ASSERT_EQUAL_INT(63 - Runtime::kMaxBytesPerPass, Serial.available());
     w.add(gLast);
-    recordPass(PSTR("RX pass: 63 bytes of other traffic on USB"), w);
+    recordPass(PSTR("RX pass: 63 bytes of other traffic waiting on USB, 32 read"), w);
+    SerialPoke::clearRx(Serial);
+    usbLines.consume();
     w = WorstPass();
     SerialPoke::inject(Serial1, junk);
     SerialPoke::inject(Serial, junk);
     gNow += 2;
     loopPass(gNow, kNone, kNone);
+    TEST_ASSERT_EQUAL_INT(63 - Runtime::kMaxBytesPerPass, Serial1.available());
+    TEST_ASSERT_EQUAL_INT(63, Serial.available());  // the shared budget went to Serial1
     w.add(gLast);
-    recordPass(PSTR("RX pass: 63 bytes on each port"), w);
+    recordPass(PSTR("RX pass: 63 bytes waiting on each port, 32 read in all (shared budget)"), w);
+    SerialPoke::clearRx(Serial1);
+    SerialPoke::clearRx(Serial);
+    wcbLines.consume();
+    usbLines.consume();
     settle(gNow);
 }
 

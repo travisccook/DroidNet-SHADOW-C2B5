@@ -83,6 +83,37 @@ void injectLine(PGM_P body) {
     SerialPoke::inject(Serial1, "\r");
 }
 
+// The most a pass reads: one full read budget, shared by both ports. Labels say "32 bytes".
+static_assert(Runtime::kMaxBytesPerPass == 32, "the timing labels say a full read budget is 32 bytes");
+
+// A request (with its CRC) arranged so that a full read budget ends with its CR: the most a pass
+// reads, completing the line at its last byte. `lead` is what has to arrive, and be read, in an
+// earlier pass (the line's first bytes, when the line and its CR are longer than the budget);
+// `budget` is the Runtime::kMaxBytesPerPass bytes after it (other traffic, ended by a CR, first
+// when the line is shorter).
+struct BudgetLine {
+    char lead[LineReader::kMaxLen + 2];
+    char budget[Runtime::kMaxBytesPerPass + 1];
+};
+void budgetLine(PGM_P body, BudgetLine &b) {
+    crcLine(body);
+    const uint8_t n = static_cast<uint8_t>(strlen(gLine) + 1);  // with the CR
+    constexpr uint8_t B = Runtime::kMaxBytesPerPass;
+    if (n >= B) {
+        const uint8_t head = static_cast<uint8_t>(n - B);
+        memcpy(b.lead, gLine, head);
+        b.lead[head] = '\0';
+        memcpy(b.budget, gLine + head, B - 1);
+    } else {
+        b.lead[0] = '\0';
+        memset(b.budget, 'j', B - n);
+        b.budget[B - n - 1] = '\r';
+        memcpy(b.budget + (B - n), gLine, n - 1);
+    }
+    b.budget[B - 1] = '\r';
+    b.budget[B] = '\0';
+}
+
 // The worst state, the reply route at its longest (HELLO 20) and EVENTS on, so every press also
 // sends a PRESS line.
 void worstState(bool events = true) {

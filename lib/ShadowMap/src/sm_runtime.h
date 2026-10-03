@@ -35,7 +35,12 @@ class Runtime {
     // Announce line length (with its \r) minus the firmware version's length:
     // @WDP1 {"type":"Shadow","fw":"<fw>"}\r
     static constexpr uint8_t kAnnounceOverhead = 32;
-    static constexpr uint8_t kMaxBytesPerPass = 64;
+    // Request bytes read in one pass, shared by both ports (the WCB first, USB gets what's left).
+    // At 9600 baud about 1 byte arrives a millisecond, so 32 a pass still empties the UART's 64-byte
+    // RX buffer far faster than it fills; a request longer than 32 bytes takes one more pass to read.
+    // 64 left the worst read pass (a full budget ending a GET of v4's 93-character SLOT line,
+    // answered) about 11 us under 1 ms on the emulated ATmega2560.
+    static constexpr uint8_t kMaxBytesPerPass = 32;
     static constexpr uint32_t kDeferMaxMs = 250;  // a deferred press older than this is dropped
     static constexpr uint16_t kDoubleTapMs = 350;  // default window from the first press to the second
     static constexpr uint16_t kLongPressMs = 600;  // default hold for a long press

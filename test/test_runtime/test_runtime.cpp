@@ -230,8 +230,15 @@ static void test_pump_keeps_the_uart_drained_while_a_reply_waits() {
     rig->in.load(stream);
     rig->runtime.pump(rig->in, rig->reader, rig->wcbPort);
     TEST_ASSERT_TRUE(rig->reader.ready());  // held: no room to reply
+    // Each call reads and drops a full read budget of the noise behind it, so it isn't left to
+    // overflow the UART's RX buffer.
+    const size_t before = rig->in.pos;
     rig->runtime.pump(rig->in, rig->reader, rig->wcbPort);
-    TEST_ASSERT_EQUAL_UINT32(rig->in.len, rig->in.pos);  // and the noise was read, not left to overflow
+    TEST_ASSERT_EQUAL_UINT32(before + Runtime::kMaxBytesPerPass, rig->in.pos);
+    for (uint8_t i = 0; i < 8 && rig->in.pos < rig->in.len; ++i)
+        rig->runtime.pump(rig->in, rig->reader, rig->wcbPort);
+    TEST_ASSERT_EQUAL_UINT32(rig->in.len, rig->in.pos);
+    TEST_ASSERT_TRUE(rig->reader.ready());  // still held
     // Once there's room, the held request is answered.
     for (uint32_t t = 1; t < 400 && rig->wcb.usb.count == 0; ++t)
         pass(t, held(0));
