@@ -213,6 +213,10 @@ class WcbSim {
     }
 
     int room = 63;  // HardwareSerial's TX buffer when empty
+    // Set by tests that fire raw commands: a line that isn't a reply or an announce then goes to
+    // `commands` exactly as it is, bare or with '^' or ";T", because SHADOW sends raw commands as
+    // typed. Replies are still checked.
+    bool rawOk = false;
     LineLog usb;       // replies as the Pi sees them
     LineLog commands;  // everything else the WCB would act on
     LineLog announces;
@@ -222,7 +226,24 @@ class WcbSim {
     uint8_t lastRoute = 0xFF;
 
   private:
+    static bool isReply(const char *s) {
+        if (strncmp(s, ";S0", 3) == 0)
+            return true;
+        if (s[0] != ';' || s[1] != 'W')
+            return false;
+        const char *p = s + 2;
+        while (*p >= '0' && *p <= '9')
+            ++p;
+        if (*p == ',')
+            ++p;
+        return strncmp(p, ";S0", 3) == 0;
+    }
+
     void line(const char *s, size_t n) {
+        if (rawOk && strncmp(s, "@WDP", 4) != 0 && !isReply(s)) {
+            commands.add(s, n);
+            return;
+        }
         if (strchr(s, '^') != nullptr || strchr(s, '\n') != nullptr)
             ++violations;
         if (strncmp(s, "@WDP", 4) == 0) {

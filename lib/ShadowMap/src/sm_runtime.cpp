@@ -171,25 +171,28 @@ void Runtime::defer(uint8_t slot, bool modFromOther, uint32_t nowMs) {
     tx_.holdForCommand(true);
 }
 
-// Sends a press: its command (if its slot maps to one) and its PRESS event. False, sending nothing,
-// when it can't go this pass: kMaxFiresPerPass already fired, the EEPROM is mid-write and the slot has
-// to be read, or the command doesn't fit in the TX queue.
+// Sends a press: its command (if its slot maps to one) and its PRESS event. A stored-command key goes
+// out as prefix + key + suffix, a raw command as its text alone. False, sending nothing, when it can't
+// go this pass: kMaxFiresPerPass already fired, the EEPROM is mid-write and the slot has to be read,
+// or the command doesn't fit in the TX queue.
 bool Runtime::fire(uint8_t slot, bool modFromOther, FiredPress *fired) {
     if (firesThisPass_ >= kMaxFiresPerPass)
         return false;
     char key[kKeyBuf];
     Source src = Source::Default;
-    if (!store_.keyForSlot(slot, key, &src))
+    bool raw = false;
+    if (!store_.keyForSlot(slot, key, &src, &raw))
         return false;
-    if (key[0] != '\0' && !pushCommand(tx_, store_.prefix(), key, store_.suffix()))
+    if (key[0] != '\0' && !(raw ? pushRaw(tx_, key) : pushCommand(tx_, store_.prefix(), key, store_.suffix())))
         return false;
     ++firesThisPass_;
-    protocol_.notifyPress(slot, key, src, modFromOther);
+    protocol_.notifyPress(slot, key, src, modFromOther, raw);
     if (fired != nullptr) {
         fired->slot = slot;
         memcpy(fired->key, key, kKeyBuf);
         fired->src = src;
         fired->modFromOther = modFromOther;
+        fired->raw = raw;
     }
     return true;
 }

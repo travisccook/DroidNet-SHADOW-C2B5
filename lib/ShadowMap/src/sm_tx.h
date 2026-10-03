@@ -18,8 +18,8 @@ class TxQueue {
     uint8_t freeSpace() const { return static_cast<uint8_t>(kCapacity - used_); }
 
     // On whenever a button press is waiting to fire (no room, the EEPROM mid-write, or the
-    // three-a-pass limit; sm::Runtime): replies, events and the announce stay out of the queue so
-    // the drain frees room for it. pushCommand() ignores the hold.
+    // Runtime::kMaxFiresPerPass limit): replies, events and the announce stay out of the queue so
+    // the drain frees room for it. pushCommand() and pushRaw() ignore the hold.
     void holdForCommand(bool on) { held_ = on; }
     bool heldForCommand() const { return held_; }
 
@@ -70,5 +70,10 @@ constexpr uint8_t kCommandHeadroom = kPrefixMax + kKeyMax + kSuffixMax + 1;
 
 // Queues prefix + key + suffix + '\r'. Ignores the headroom: this is what it is reserved for.
 bool pushCommand(TxQueue &tx, const char *prefix, const char *key, const char *suffix);
+
+// Queues a raw command: the text exactly as typed, then '\r', with no prefix or suffix. Ignores
+// the headroom, like pushCommand: a raw command (16 bytes at most) always fits in it.
+bool pushRaw(TxQueue &tx, const char *text);
+static_assert(kKeyMax + 1 <= kCommandHeadroom, "a raw command must fit the command headroom");
 
 }  // namespace sm

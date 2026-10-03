@@ -43,6 +43,11 @@ static void test_set_reboot_defaults_on_real_eeprom() {
         runUntilIdle(store);
         TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MapStore::Completion::Done),
                                 static_cast<uint8_t>(store.takeCompletion()));
+        TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MapStore::Result::Ok),
+                                static_cast<uint8_t>(store.beginSet(kSlotDomeCrossLeft, "a ;T^b", true)));
+        runUntilIdle(store);
+        TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MapStore::Completion::Done),
+                                static_cast<uint8_t>(store.takeCompletion()));
         TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MapStore::Result::Ok), static_cast<uint8_t>(store.beginPrefix(";SEQ")));
         runUntilIdle(store);
         TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MapStore::Completion::Done),
@@ -57,7 +62,11 @@ static void test_set_reboot_defaults_on_real_eeprom() {
     TEST_ASSERT_TRUE(rebooted.keyForSlot(kSlotFootNoneDown, key, &src));
     TEST_ASSERT_EQUAL_STRING("realeeprom", key);
     TEST_ASSERT_TRUE(src == Source::Eeprom);
-    TEST_ASSERT_EQUAL_UINT8(1, rebooted.validEepromSlots());
+    bool raw = false;
+    TEST_ASSERT_TRUE(rebooted.keyForSlot(kSlotDomeCrossLeft, key, &src, &raw));
+    TEST_ASSERT_EQUAL_STRING("a ;T^b", key);  // the flag is bit 7 on the real EEPROM too
+    TEST_ASSERT_TRUE(raw && src == Source::Eeprom);
+    TEST_ASSERT_EQUAL_UINT8(2, rebooted.validEepromSlots());
 
     TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MapStore::Result::Ok), static_cast<uint8_t>(rebooted.beginDefaults()));
     runUntilIdle(rebooted);
@@ -139,6 +148,23 @@ static void test_per_pass_work_is_bounded() {
     report("pass during SET double", worst);
     TEST_ASSERT_TRUE(store.doubleTapMapped(slotIndex(Ctrl::D, Mod::CIRCLE, Btn::RIGHT)));
 
+    // The longest request now: a SET with 15 raw bytes, hex-decoded on the way in.
+    withCrc("@SM SET D CIRCLE UP !3B57323B5334504C41593A335E3B54", line, sizeof(line));
+    t = micros();
+    TEST_ASSERT_TRUE(protocol.handleLine(line, port));
+    report("handleLine(SET raw)", micros() - t);
+    worst = 0;
+    for (uint32_t i = 0; i < 200000UL && (store.busy() || protocol.opInProgress()); ++i) {
+        t = micros();
+        protocol.service();
+        store.step();
+        tx.drain(wcb);
+        const unsigned long dt = micros() - t;
+        if (dt > worst)
+            worst = dt;
+    }
+    report("pass during SET raw", worst);
+
     // Boot reads every double-tap record once (setup(), not the loop).
     static MapStore rebooted(io, kTestDefaults, kTestDefaultCount);
     t = micros();
@@ -174,6 +200,16 @@ static void test_per_pass_work_is_bounded() {
     TEST_ASSERT_TRUE(pushCommand(tx, store.prefix(), key, store.suffix()));
     tx.drain(wcb);
     report("button press", micros() - t);
+
+    // A raw press: read the slot (raw), queue the text.
+    t = micros();
+    char rawText[kKeyBuf];
+    bool isRaw = false;
+    TEST_ASSERT_TRUE(store.keyForSlot(slotIndex(Ctrl::D, Mod::CIRCLE, Btn::UP), rawText, nullptr, &isRaw));
+    TEST_ASSERT_TRUE(isRaw);
+    TEST_ASSERT_TRUE(pushRaw(tx, rawText));
+    tx.drain(wcb);
+    report("button press (raw)", micros() - t);
 
     // Button passes through the runtime: the second tap of a double tap, the worst of them.
     static Runtime taps(store, protocol, tx, nullptr);

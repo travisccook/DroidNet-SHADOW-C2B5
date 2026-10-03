@@ -62,4 +62,11 @@ bool pushCommand(TxQueue &tx, const char *prefix, const char *key, const char *s
     return tx.pushLine(parts, 3);
 }
 
+bool pushRaw(TxQueue &tx, const char *text) {
+    const size_t n = strlen(text);
+    if (n >= TxQueue::kCapacity)
+        return false;
+    return tx.pushLine2(text, static_cast<uint8_t>(n), nullptr, 0);  // one copy
+}
+
 }  // namespace sm

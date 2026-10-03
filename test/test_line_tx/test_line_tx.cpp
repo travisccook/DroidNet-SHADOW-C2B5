@@ -209,6 +209,18 @@ static void test_hold_keeps_replies_out() {
     TEST_ASSERT_TRUE(port.canSend(10));
 }
 
+static void test_command_headroom_fits_the_longest_raw_command() {
+    TxQueue q;
+    char fill[TxQueue::kCapacity];
+    const uint8_t fillLen = TxQueue::kCapacity - kCommandHeadroom - 1;
+    memset(fill, 'f', fillLen);
+    fill[fillLen] = '\0';
+    const char *parts[] = {fill};
+    TEST_ASSERT_TRUE(q.pushLine(parts, 1));
+    TEST_ASSERT_TRUE(pushRaw(q, "~~~~~~~~~~~~~~~"));  // 15 characters and '\r'
+    TEST_ASSERT_EQUAL_UINT8(kCommandHeadroom - 16, q.freeSpace());
+}
+
 int runAllTests() {
     UNITY_BEGIN();
     RUN_TEST(test_reader_keeps_only_sm_lines);
@@ -219,6 +231,7 @@ int runAllTests() {
     RUN_TEST(test_queue_is_all_or_nothing);
     RUN_TEST(test_queue_wraps_and_drains_at_uart_speed);
     RUN_TEST(test_command_headroom_fits_the_longest_command);
+    RUN_TEST(test_command_headroom_fits_the_longest_raw_command);
     RUN_TEST(test_hold_keeps_replies_out);
     return UNITY_END();
 }

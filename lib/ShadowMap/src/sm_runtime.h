@@ -20,6 +20,7 @@ struct FiredPress {
     char key[kKeyBuf];  // "" = unmapped
     Source src;
     bool modFromOther;  // the modifier was held on the other controller
+    bool raw;           // key is a raw command, sent as typed
 };
 
 class Runtime {
