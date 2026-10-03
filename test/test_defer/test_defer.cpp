@@ -272,6 +272,39 @@ static void test_a_fault_clears_the_hold_and_old_presses_drop() {
     TEST_ASSERT_EQUAL_UINT32(0, rig->wcb.commands.count);
 }
 
+// A press that waited for the busy EEPROM sends its PRESS event when it fires.
+static void test_a_deferred_press_sends_its_event() {
+    mapSlot(kFUp, "fup");
+    mapSlot(doubleOf(kFUp), "fup2");
+    char line[48], req[64];
+    withCrc("@SM EVENTS 1", req, sizeof(req));
+    TEST_ASSERT_TRUE(rig->protocol.handleLine(req, rig->wcbPort));
+    uint32_t t = 0;
+    drainOut(t);
+    rig->wcb.usb.count = 0;
+    pass(1000, held(kHeldUp), kOff);
+    pass(1002, kNone, kNone);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MapStore::Result::Ok),
+                            static_cast<uint8_t>(rig->store.beginSet(kFDown, "busy")));
+    rig->store.step();
+    rig->eepromFrozen = true;
+    pass(1000 + Runtime::kDoubleTapMs, kNone, kNone);
+    TEST_ASSERT_EQUAL_UINT8(1, rig->runtime.deferredCount());
+    rig->eepromFrozen = false;
+    t = 1000 + Runtime::kDoubleTapMs;
+    for (uint8_t i = 0; i < 20 && rig->runtime.deferredCount() > 0; ++i)
+        pass(t += 2, kNone, kNone);
+    drainOut(t);
+    TEST_ASSERT_EQUAL_UINT32(1, rig->wcb.commands.count);
+    bool found = false;
+    for (uint8_t i = 0; i < rig->wcb.usb.count; ++i) {
+        const char *l = rig->wcb.usb.last(static_cast<uint8_t>(rig->wcb.usb.count - 1 - i));
+        if (stripCrc(l, line, sizeof(line)) && strncmp(line, "@SM PRESS", 9) == 0 && strstr(line, "fup") != nullptr)
+            found = true;
+    }
+    TEST_ASSERT_TRUE_MESSAGE(found, "no PRESS event for the deferred press");
+}
+
 int runAllTests() {
     UNITY_BEGIN();
     RUN_TEST(test_a_command_waits_for_room);
@@ -282,5 +315,6 @@ int runAllTests() {
     RUN_TEST(test_a_waiting_single_goes_before_the_double_tap_after_it);
     RUN_TEST(test_an_unmapped_press_needs_no_room);
     RUN_TEST(test_a_fault_clears_the_hold_and_old_presses_drop);
+    RUN_TEST(test_a_deferred_press_sends_its_event);
     return UNITY_END();
 }

@@ -17,8 +17,9 @@ class TxQueue {
     uint8_t used() const { return used_; }
     uint8_t freeSpace() const { return static_cast<uint8_t>(kCapacity - used_); }
 
-    // While a button command waits for room (sm::Runtime), replies, events and the announce stay
-    // out of the queue so the drain frees room for it. pushCommand() ignores the hold.
+    // On whenever a button press is waiting to fire (no room, the EEPROM mid-write, or the
+    // three-a-pass limit; sm::Runtime): replies, events and the announce stay out of the queue so
+    // the drain frees room for it. pushCommand() ignores the hold.
     void holdForCommand(bool on) { held_ = on; }
     bool heldForCommand() const { return held_; }
 

@@ -9,6 +9,7 @@ namespace sm {
 bool Runtime::buttons(uint32_t nowMs, const PadState &foot, const PadState &dome, FiredPress *fired) {
     protocol_.setPads(foot.connected, dome.connected);
     firesThisPass_ = 0;
+    tx_.holdForCommand(false);  // a press that waits turns it back on, below
     bool any = false;
     // Presses that waited, oldest first. One that still can't go keeps its place, and so does
     // everything behind it. Only while still fresh and its controller is still there (a fault can
@@ -24,6 +25,7 @@ bool Runtime::buttons(uint32_t nowMs, const PadState &foot, const PadState &dome
             continue;
         }
         deferred_[kept++] = d;
+        tx_.holdForCommand(true);  // whatever is queued after a press known to wait waits too
     }
     deferredCount_ = kept;
     any = handlePad(Ctrl::D, dome, foot, nowMs, fired) || any;
@@ -166,6 +168,7 @@ void Runtime::defer(uint8_t slot, bool modFromOther, uint32_t nowMs) {
         return;
     }
     deferred_[deferredCount_++] = {slot, modFromOther, nowMs};
+    tx_.holdForCommand(true);
 }
 
 // Sends a press: its command (if its slot maps to one) and its PRESS event. False, sending nothing,
