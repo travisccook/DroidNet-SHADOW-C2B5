@@ -86,7 +86,6 @@ for long: presses fire on transitions and timers (the shared repeat is once a se
 
 - A request arriving in a press pass is handled one pass later (2-3 ms), so the press's command and PRESS event go
   out before its reply, and a SET in that pass takes effect after that press.
-- A second request already in the RX buffer waits one pass (two in one pass measured 977.5 us).
 - A background line (DUMP line, battery report) that would have gone out in a press pass or after a request goes
   out one pass later.
 - READY in the first pass after a boot names that pass's controllers, not `pads=-` (`setPads` now runs before
@@ -95,8 +94,8 @@ for long: presses fire on transitions and timers (the shared repeat is once a se
   sent. The cause is the same as READY's `pads=`: `setPads` now runs before the request.
 - A request queued right behind one that can't be answered yet is read and dropped, under the existing rule. The
   Pi sends one request at a time and resends on silence.
-- A second request already in the RX buffer waits one pass, so a background line (for example a DUMP line) can go
-  out before its reply.
+- A second request already in the RX buffer waits one pass (two requests, one a pump call, measure 724.5 us in the
+  final suite), so a background line (for example a DUMP line) can go out before its reply.
 - Button commands, and PRESS events of presses that waited, that `0a8b73f` dropped for want of TX room are now
   sent later, in order.
 
@@ -157,7 +156,7 @@ What protects the motors, and how each is checked:
 | The mapping never touches Serial2 or motor state | `lib/ShadowMap` has no Arduino dependency; `main.cpp` glue only | review |
 | Interrupts are off only briefly | `sm::Uart1`'s atomic blocks are a few instructions each; nothing new adds any | review |
 | No debug output stalls the loop | `SHADOW_VERBOSE` off (below) | the build; `config.h` |
-| RAM stays safe | static SRAM grows by at most 64 bytes over Part A (2895) | the build's RAM line, recorded in the design doc |
+| RAM stays safe | static SRAM grows by at most 64 bytes over 1969 (the build with `SHADOW_VERBOSE` off), limit 2033; measured 2018 | the build's RAM line, recorded in the design doc |
 
 **Found while checking: blocking debug output. Owner's decision (2026-10-02): turn `SHADOW_VERBOSE` off.** With it
 on (`include/config.h`), every press, ramp step and battery change adds a line to `output`, and `printOutput()` hands
@@ -176,8 +175,7 @@ events carry the same slot, key and source), or turn `SHADOW_VERBOSE` back on fo
 ## 8. Testing
 
 - Timing suites ("five presses in one pass" is superseded by the three-a-pass limit; the four-due figure, three
-  then one, covers it): `SM_TIMING_REPORT_ONLY` removed, so any figure at or over 1 ms fails. New figures: five presses
-  in one pass (with and without EVENTS), a press with each request kind arriving, two requests, the background unit
+  then one, covers it): `SM_TIMING_REPORT_ONLY` removed, so any figure at or over 1 ms fails. New figures: a press with each request kind arriving, two requests, the background unit
   in the pass after a request, presses while commands wait for room.
 - `test_scheduler` (new): the rule's three cases; a press pass reads nothing; alternation under sustained requests
   (requests and background both progress); a DUMP and a stream of GETs both finish; the battery report and announce

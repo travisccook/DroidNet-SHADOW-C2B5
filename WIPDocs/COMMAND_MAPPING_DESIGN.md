@@ -473,9 +473,12 @@ The library has no Arduino dependency, so it builds and tests on the host.
   - The worst whole pass is the 63-byte read that ends with the worst GET, answered, plus the drain:
     944.5 us, 56 us under the limit. @SM v4's longer lines (`kMaxLine` 96, a 93-character SLOT) will
     grow this pass, so the raw-commands work must re-measure it.
-  - While a WCB request can't be answered yet, the USB port isn't read. This is bench-only and bounded.
-  - A request refused for room still counts as the pass's request. A press in every other pass could
-    therefore delay requests indefinitely, but real presses come about a second apart.
+  - While a WCB request can't be answered yet, the USB port isn't read. The request waits for room in
+    the TX queue (the 9600-baud drain frees it, about 1 byte a ms) or for the EEPROM write to finish
+    (a few ms a byte). This only matters on the bench, where the USB port is used.
+  - A request refused for room still counts as the pass's request. Presses landing in most
+    passes, with the queue full, can therefore keep delaying a request that can't be answered (the
+    Task 6 sweeps put a press every 2-3 passes with a slow drain); real presses come about a second apart.
 
   Boot reads the 144 double-tap and long-press records once, in `setup()`.
 
@@ -498,8 +501,7 @@ The library has no Arduino dependency, so it builds and tests on the host.
     from 3801 before the runtime mapping (the tables, descriptions and switch strings are gone).
     Double taps added 89 of them; timing Part A saved 21 (the hex digit table went to flash).
     Part A left it at 2895. Turning `SHADOW_VERBOSE` off in round 2 saved about 930 bytes (to 1969);
-    the round's own growth is 49 bytes, inside
-    the 64-byte budget (limit 1969 + 64 = 2033).
+    the round's own growth is 49 bytes, inside the 64-byte budget (limit 1969 + 64 = 2033).
   - Flash is 54,404 of 253,952 bytes (56,264 after Part A, with `SHADOW_VERBOSE` on; 53,126 before
     Part A).
 
