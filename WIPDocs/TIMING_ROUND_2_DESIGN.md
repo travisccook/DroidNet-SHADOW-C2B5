@@ -137,16 +137,22 @@ What protects the motors, and how each is checked:
 | The mapping never waits | no busy-waits outside `setup()`; EEPROM, UART and queue checks all return | existing tests, review |
 | The mapping never touches Serial2 or motor state | `lib/ShadowMap` has no Arduino dependency; `main.cpp` glue only | review |
 | Interrupts are off only briefly | `sm::Uart1`'s atomic blocks are a few instructions each; nothing new adds any | review |
+| No debug output stalls the loop | `SHADOW_VERBOSE` off (below) | the build; `config.h` |
 | RAM stays safe | static SRAM grows by at most 64 bytes over Part A (2895) | the build's RAM line, recorded in the design doc |
 
-**Found while checking: blocking debug output (in scope, flagged for the owner).** `SHADOW_VERBOSE` is on
-(`include/config.h`), so every press adds an "ACTIVATED: ..." line to `output`, and `printOutput()` hands it all to
-`Serial.println`. That call blocks until everything but the last 64 bytes has been sent at 115200 (about 11.5 bytes
-a millisecond): a few presses' lines block the loop for 5-10 ms, far more than any mapping pass. `0a8b73f` does the
-same. **Fix:** `printOutput()` writes only what `Serial.availableForWrite()` takes and keeps the rest for later
-passes; `output` is capped (512 bytes), and text over the cap is dropped with a "[debug output dropped]" marker.
-Debug text on the USB port may then arrive a few passes later; nothing else changes. USB `@SM` replies keep their
-128-byte rule, which now also never blocks.
+**Found while checking: blocking debug output. Owner's decision (2026-10-02): turn `SHADOW_VERBOSE` off.** With it
+on (`include/config.h`), every press, ramp step and battery change adds a line to `output`, and `printOutput()` hands
+it all to `Serial.println`, which blocks until everything but the last 64 bytes has gone out at 115200 (about 11.5
+bytes a millisecond): several milliseconds per pass while driving, far more than any mapping pass. `0a8b73f` does
+the same. Every `SHADOW_VERBOSE` block in `main.cpp` is logging only (plus `setup()`'s count of valid EEPROM slots),
+so turning it off changes nothing else. Nothing reads the verbose text: DroidNet never opens SHADOW's USB port
+(opening it resets the Mega) and talks to it only through the WCB; no DroidNet or SHADOW code or test matches any
+verbose string.
+
+With it off, the only thing that still writes to `output` in `loop()` is a USB `@SM` reply (bench only, 128-byte
+rule, at most about 5.5 ms while someone has the USB port open). That stays as it is. For the bench check in
+`WIPDocs/HANDOFF_BUTTON_MAP.md` that read `ACTIVATED:` lines, use `shadowmap.py --usb` with `EVENTS 1` (the PRESS
+events carry the same slot, key and source), or turn `SHADOW_VERBOSE` back on for that session.
 
 ## 8. Testing
 
@@ -161,7 +167,7 @@ Debug text on the USB port may then arrive a few passes later; nothing else chan
   dropped; while a command waits, no reply is queued.
 - EEPROM step: a write over fully matching bytes reads at most 4 per step and ends with the same EEPROM image,
   verify and reply.
-- Debug output: `printOutput()` never writes more than the TX buffer takes; the cap and marker.
+- `SHADOW_VERBOSE` off: the firmware builds without warnings, and the HANDOFF_BUTTON_MAP bench step is updated.
 - Transcripts: every stream identical to `0a8b73f` except the differences listed in section 3, each named in
   `test_transcripts.py`.
 - All of: `pio run`, `pio test -e native`, `pio test -e simavr --without-uploading`,
