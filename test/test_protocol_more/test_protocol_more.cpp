@@ -135,7 +135,7 @@ static void test_press_reports_modifier_from_other_controller() {
 
 static void test_controller_state_in_ready_and_events() {
     rig->protocol.setPads(true, false);
-    TEST_ASSERT_EQUAL_STRING("@SM READY v3 fw=test slots=216 gen=0 fmt=0 pads=F", ask("@SM HELLO"));
+    TEST_ASSERT_EQUAL_STRING("@SM READY v4 fw=test slots=216 gen=0 fmt=0 pads=F", ask("@SM HELLO"));
     ask("@SM EVENTS 1");
     for (int i = 0; i < 30; ++i)
         pass();
@@ -146,9 +146,9 @@ static void test_controller_state_in_ready_and_events() {
     rig->protocol.setPads(false, false);
     TEST_ASSERT_EQUAL_STRING("@SM CTL F 0", await());
     TEST_ASSERT_EQUAL_STRING("@SM CTL D 0", await());
-    TEST_ASSERT_EQUAL_STRING("@SM READY v3 fw=test slots=216 gen=0 fmt=0 pads=-", ask("@SM HELLO"));
+    TEST_ASSERT_EQUAL_STRING("@SM READY v4 fw=test slots=216 gen=0 fmt=0 pads=-", ask("@SM HELLO"));
     rig->protocol.setPads(false, true);
-    TEST_ASSERT_EQUAL_STRING("@SM READY v3 fw=test slots=216 gen=0 fmt=0 pads=D", ask("@SM HELLO"));
+    TEST_ASSERT_EQUAL_STRING("@SM READY v4 fw=test slots=216 gen=0 fmt=0 pads=D", ask("@SM HELLO"));
 }
 
 static void test_long_press_slots_v3() {

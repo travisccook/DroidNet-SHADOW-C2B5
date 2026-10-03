@@ -1,9 +1,10 @@
 // Passes where more than one heavy thing can't be moved to another pass (see
 // test/support/sm_avr_timing.h for the classes): a press fired as the EEPROM writer finishes a
-// job (T2), two presses in one pass (T2), and three (T3). Presses can't wait for a later pass
-// (their timing rules, WIPDocs/COMMAND_MAPPING_DESIGN.md, are fixed) except that at most
-// Runtime::kMaxFiresPerPass fire in one pass and a press that finds no room in the TX queue waits:
-// those wait one pass, in order (WIPDocs/TIMING_ROUND_2_DESIGN.md, section 4). AVR only.
+// job (T2), two presses in one pass (T2), and three or four due in one pass (T3: two fire, the rest
+// wait a pass). Presses can't wait for a later pass (their timing rules,
+// WIPDocs/COMMAND_MAPPING_DESIGN.md, are fixed) except that at most Runtime::kMaxFiresPerPass (2) fire
+// in one pass and a press that finds no room in the TX queue waits: those wait one pass, in order
+// (WIPDocs/TIMING_ROUND_2_DESIGN.md, section 4). AVR only.
 #include <unity.h>
 
 #include <ShadowMap.h>
@@ -120,7 +121,8 @@ static void test_two_presses() {
 
 namespace {
 
-// Three or four presses in one pass P:
+// Three or four presses due in one pass P (Runtime::kMaxFiresPerPass, two, fire in P; the rest wait
+// for P + 2, in order, and the figure is the worse of the two passes):
 //   - D CIRCLE RIGHT, its double tap mapped, tapped once: its window runs out in the pass before P,
 //     with the EEPROM busy, so it's deferred and fires in P;
 //   - D CIRCLE UP, its double tap mapped, pressed in the pass before P and turned into D CIRCLE
@@ -129,8 +131,9 @@ namespace {
 //   - F CIRCLE RIGHT (CIRCLE from the dome), held since P - 600 ms: its long press fires in P.
 // With `finishing`, a SET's verify-and-finish step is due in P too, and there is no deferred press:
 // a deferred press always skips the writer's next step (MapStore::readWanted_), so the two can't
-// meet. Three presses is then the most one pass can fire: the shared repeat timer lets one combo
-// fire at once a second, and a controller fires at most one press besides that.
+// meet. Three presses is then the most that can come due in one pass with the writer finishing: the
+// shared repeat timer lets one combo fire at once a second, and a controller fires at most one press
+// besides that.
 WorstPass manyPresses(uint8_t fires, bool finishing) {
     const bool deferred = !finishing;
     const bool downFires = fires == 4 || finishing;
@@ -184,12 +187,14 @@ WorstPass manyPresses(uint8_t fires, bool finishing) {
     TEST_ASSERT_FALSE(store.finishDue());
     w.add(gLast);
     if (fires > Runtime::kMaxFiresPerPass) {
-        // Three fire; the long press (the last of them) waits one pass in order.
+        // Two fire; the rest (the long press last) wait one pass, in order, and all fire in it.
+        const uint8_t rest = static_cast<uint8_t>(fires - Runtime::kMaxFiresPerPass);
+        TEST_ASSERT_TRUE(rest <= Runtime::kMaxFiresPerPass);
         TEST_ASSERT_EQUAL_UINT8(Runtime::kMaxFiresPerPass, runtime.firesLastPass());
-        TEST_ASSERT_EQUAL_UINT8(1, runtime.deferredCount());
+        TEST_ASSERT_EQUAL_UINT8(rest, runtime.deferredCount());
         loopPass(p + 2, kFootRight, kDomeCircleDownHeld);
         TEST_ASSERT_TRUE(gAny);
-        TEST_ASSERT_EQUAL_UINT8(1, runtime.firesLastPass());
+        TEST_ASSERT_EQUAL_UINT8(rest, runtime.firesLastPass());
         TEST_ASSERT_EQUAL_UINT8(0, runtime.deferredCount());
         w.add(gLast);
     } else {
@@ -205,9 +210,10 @@ WorstPass manyPresses(uint8_t fires, bool finishing) {
 }  // namespace
 
 static void test_three_and_four_presses() {
-    recordPass(PSTR("three presses in one pass (one deferred)"), manyPresses(3, false), kT3);
-    recordPass(PSTR("four presses due in one pass (three fire, one waits a pass)"), manyPresses(4, false), kT3);
-    recordPass(PSTR("three presses + a write's last step"), manyPresses(3, true), kT3);
+    recordPass(PSTR("three presses due in one pass (one deferred): two fire, one waits a pass"), manyPresses(3, false),
+               kT3);
+    recordPass(PSTR("four presses due in one pass: two fire, two wait a pass"), manyPresses(4, false), kT3);
+    recordPass(PSTR("three presses due + a write's last step: two fire, one waits a pass"), manyPresses(3, true), kT3);
 }
 
 // Presses that find the TX queue full wait in order and go as the drain frees room: every pass from

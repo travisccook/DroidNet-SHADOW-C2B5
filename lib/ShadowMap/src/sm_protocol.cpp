@@ -11,7 +11,7 @@ namespace sm {
 
 namespace {
 
-constexpr uint8_t kProtocolVersion = 3;  // 2: double-tap slots; 3: long-press slots
+constexpr uint8_t kProtocolVersion = 4;  // 2: double-tap slots; 3: long-press slots; 4: raw commands
 constexpr uint8_t kMaxRouteLen = 8;  // ";W20,;S0"
 constexpr uint8_t kMaxArgs = 7;
 
@@ -67,6 +67,20 @@ bool decodeHex(const char *hex, char *out, uint8_t max) {
     }
     out[n / 2] = '\0';
     return true;
+}
+
+// "!" and the text's bytes in upper-case hex, NUL-terminated: how a raw command travels.
+void rawToken(const char *text, char *out, uint8_t cap) {
+    uint8_t n = 0;
+    out[n++] = '!';
+    for (; *text != '\0' && n + 2 < cap; ++text) {
+        const uint8_t b = static_cast<uint8_t>(*text);
+        const uint8_t hi = static_cast<uint8_t>(b >> 4);
+        const uint8_t lo = static_cast<uint8_t>(b & 0x0F);
+        out[n++] = static_cast<char>(hi < 10 ? '0' + hi : 'A' - 10 + hi);
+        out[n++] = static_cast<char>(lo < 10 ? '0' + lo : 'A' - 10 + lo);
+    }
+    out[n] = '\0';
 }
 
 bool parseRoute(const char *s, uint8_t *out) {
@@ -138,11 +152,11 @@ PGM_P sourceToken(Source src) {
     return PSTR("default");
 }
 
-// A SLOT line's text after the slot's name: " <key|-> <source> def=<default|->", or
+// A SLOT line's text after the slot's name: " <key|!hex|-> <source> def=<default|->", or
 // " - reserved res=<reason>". `key` is what keyForSlot() gave; a Source::Default key is the
-// slot's default, so it isn't looked up twice.
-void slotRest(Out &out, const MapStore &store, uint8_t slot, const char *key, Source src) {
-    out.c(' ').key(key).c(' ').p(sourceToken(src));
+// slot's default (never raw), so it isn't looked up twice.
+void slotRest(Out &out, const MapStore &store, uint8_t slot, const char *key, Source src, bool raw) {
+    out.c(' ').value(key, raw).c(' ').p(sourceToken(src));
     const Reserved why = slotReserved(slot);
     if (why != Reserved::No) {
         out.p(PSTR(" res=")).p(reservedToken(why));
@@ -368,11 +382,30 @@ bool Protocol::handleLine(const char *line, ReplyPort &port) {
     }
 
     if (isSet) {
-        const char *key = strcmp(argv[4], "-") == 0 ? "" : argv[4];
-        const MapStore::Result r = store_.beginSet(slot, key);
+        // A raw command travels as "!" and its bytes in hex, so its own ';', '^' or ";T" never
+        // appear in a line the WCB carries. Anything that isn't 1-15 decodable bytes is "key";
+        // decodeHex reads "-" as nothing, so "!-" is refused here.
+        const char *arg = argv[4];
+        const bool raw = arg[0] == '!';
+        char text[kKeyBuf];
+        const char *key = arg;
+        if (raw) {
+            if (!decodeHex(arg + 1, text, kKeyMax) || text[0] == '\0') {
+                sendError(port, PSTR("key"), verb, slot);
+                return true;
+            }
+            key = text;
+        } else if (strcmp(arg, "-") == 0) {
+            key = "";
+        }
+        const MapStore::Result r = store_.beginSet(slot, key, raw);
         if (r == MapStore::Result::Ok) {
-            strncpy(opArg_, key, sizeof(opArg_) - 1);
-            opArg_[sizeof(opArg_) - 1] = '\0';
+            if (raw) {
+                rawToken(key, opArg_, sizeof(opArg_));  // upper case, however the request spelled it
+            } else {
+                strncpy(opArg_, key, sizeof(opArg_) - 1);
+                opArg_[sizeof(opArg_) - 1] = '\0';
+            }
         }
         startOp(Op::Set, port, r, verb, slot);
         return true;
@@ -441,11 +474,12 @@ void Protocol::service() {
         if (dumpNext_ < kSlotCount) {
             char key[kKeyBuf];
             Source src = Source::Default;
-            if (!store_.keyForSlot(dumpNext_, key, &src))
+            bool raw = false;
+            if (!store_.keyForSlot(dumpNext_, key, &src, &raw))
                 return;  // EEPROM busy: next pass
             Out body;
             body.slot(dumpNext_);
-            slotRest(body, store_, dumpNext_, key, src);
+            slotRest(body, store_, dumpNext_, key, src, raw);
             sumCrc_ = crc32Block(sumCrc_, reinterpret_cast<const uint8_t *>(body.str()), body.len());
             sumCrc_ = crc32Update(sumCrc_, '\n');
             ++dumpNext_;
@@ -530,26 +564,35 @@ void Protocol::sendOpReply(bool ok) {
 bool Protocol::sendSlotLine(uint8_t slot, ReplyPort &port) {
     char key[kKeyBuf];
     Source src = Source::Default;
-    if (!store_.keyForSlot(slot, key, &src))
+    bool raw = false;
+    if (!store_.keyForSlot(slot, key, &src, &raw))
         return false;
     Out out;
     out.head(Out::Head::Slot, slot);
-    slotRest(out, store_, slot, key, src);
+    slotRest(out, store_, slot, key, src, raw);
     emit(out, port);
     return true;
 }
 
-void Protocol::notifyPress(uint8_t slot, const char *key, Source src, bool modFromOther) {
-    if (eventPort_ == nullptr || !eventPort_->canSend(kMaxLine))
+void Protocol::notifyPress(uint8_t slot, const char *key, Source src, bool modFromOther, bool raw) {
+    // Sent if the event port has room for this line, not for kMaxLine: the press's command is
+    // already queued, and with a 96-character kMaxLine any command over 21 bytes would drop the
+    // event every time. Without room for even the shortest PRESS (and while a press waits for
+    // room, when the WCB port takes nothing), no line is built.
+    if (eventPort_ == nullptr || !eventPort_->canSend(kPressLineMin))
         return;
     Out out;
-    out.head(Out::Head::Press, slot).c(' ').key(key).c(' ').p(sourceToken(src));
+    out.head(Out::Head::Press, slot).c(' ').value(key, raw).c(' ').p(sourceToken(src));
     const SlotParts parts = splitSlot(slot);  // slot < kSlotCount: buttons() only fires slots
     if (modFromOther)
         out.p(PSTR(" from=")).c(parts.ctrl == static_cast<uint8_t>(Ctrl::F) ? 'D' : 'F');
     const Reserved why = slot < kSlotCount ? slotReserved(parts) : Reserved::No;
     if (why != Reserved::No)
         out.p(PSTR(" res=")).p(reservedToken(why));
+    // The line's room is checked before its CRC is worked out: the same decision as building the
+    // whole line and checking canSend(its length), since finish() adds exactly " *" and 8 digits.
+    if (!eventPort_->canSend(static_cast<uint8_t>(out.len() + 10)))
+        return;
     emit(out, *eventPort_);
 }
 

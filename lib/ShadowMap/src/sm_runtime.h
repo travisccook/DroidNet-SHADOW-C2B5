@@ -39,7 +39,9 @@ class Runtime {
     static constexpr uint16_t kDoubleTapMs = 350;  // default window from the first press to the second
     static constexpr uint16_t kLongPressMs = 600;  // default hold for a long press
     static constexpr uint8_t kMaxDeferred = 8;      // presses waiting to fire (see buttons())
-    static constexpr uint8_t kMaxFiresPerPass = 3;  // presses fired in one pass; more wait a pass, in order
+    // Presses fired in one pass; more wait a pass, in order. Two keeps the worst press pass (two
+    // presses, their PRESS events and the EEPROM writer finishing a job) under 1 ms with v4's events.
+    static constexpr uint8_t kMaxFiresPerPass = 2;
 
     // `announceFw` is the firmware version for the WCB device announce ("@WDP1 {...}");
     // nullptr turns the announce off. It starts with startAnnounce(). `doubleTapMs` is how

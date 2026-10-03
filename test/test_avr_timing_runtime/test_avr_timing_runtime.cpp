@@ -522,6 +522,10 @@ static void test_after_a_request() {
     injectLine(PSTR("@SM GET F CIRCLE RIGHTL"));
     loopPass(t += 2, kNone, kNone, 1, 1);  // due: the GET goes first
     TEST_ASSERT_TRUE(runtime.lastWork() == Runtime::Work::Request);
+    // The GET's reply leaves the queue before the owed pass, so that pass has room for the report
+    // (every reply waits for room for a kMaxLine line, 139 bytes free with the headroom; at 9600 baud
+    // the UART takes the reply in about 80 ms on the droid, and the report goes then).
+    drainAll();
     before = tx.used();
     loopPass(t += 2, kNone, kNone, 1, 1);
     TEST_ASSERT_TRUE(runtime.lastWork() == Runtime::Work::Background);

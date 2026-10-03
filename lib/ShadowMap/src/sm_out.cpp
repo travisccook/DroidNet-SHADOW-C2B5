@@ -156,6 +156,21 @@ Out &Out::hex(const char *src) {
     return *this;
 }
 
+Out &Out::rawHex(const char *src) {
+    const size_t n = strlen(src);
+    if (!reserve(static_cast<uint16_t>(1 + 2 * n)))  // one check for the whole field
+        return *this;
+    char *d = buf_ + len_;
+    *d++ = '!';
+    for (; *src != '\0'; ++src) {
+        const uint8_t b = static_cast<uint8_t>(*src);
+        *d++ = hexDigit(hiNibble(b));
+        *d++ = hexDigit(static_cast<uint8_t>(b & 0x0F));
+    }
+    advance(static_cast<uint8_t>(1 + 2 * n));
+    return *this;
+}
+
 Out &Out::hex32(uint32_t v) {
     if (!reserve(8))
         return *this;

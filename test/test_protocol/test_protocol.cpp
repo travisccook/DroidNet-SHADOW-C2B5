@@ -6,7 +6,7 @@
 #include <sm_protocol_rig.h>
 
 static void test_hello_reports_version_and_state() {
-    TEST_ASSERT_EQUAL_STRING("@SM READY v3 fw=test slots=216 gen=0 fmt=0 pads=-", ask("@SM HELLO"));
+    TEST_ASSERT_EQUAL_STRING("@SM READY v4 fw=test slots=216 gen=0 fmt=0 pads=-", ask("@SM HELLO"));
     TEST_ASSERT_EQUAL_UINT8(0, rig->wcb.lastRoute);
 }
 
@@ -38,7 +38,7 @@ static void test_crc_is_required_on_the_wcb_port() {
             *p = static_cast<char>(*p - 'A' + 'a');
     }
     TEST_ASSERT_TRUE(rig->protocol.handleLine(line, rig->wcbPort));
-    TEST_ASSERT_EQUAL_STRING("@SM READY v3 fw=test slots=216 gen=0 fmt=0 pads=-", await());
+    TEST_ASSERT_EQUAL_STRING("@SM READY v4 fw=test slots=216 gen=0 fmt=0 pads=-", await());
 }
 
 static void test_usb_port_accepts_lines_without_crc() {
@@ -69,7 +69,7 @@ static void test_set_replies_after_the_write_lands() {
     TEST_ASSERT_EQUAL_STRING("@SM SLOT F NONE DOWN scream eeprom def=angrysound", ask("@SM GET F NONE DOWN"));
     TEST_ASSERT_EQUAL_STRING("@SM OK SET F NONE DOWN -", ask("@SM SET F NONE DOWN -"));
     TEST_ASSERT_EQUAL_STRING("@SM SLOT F NONE DOWN - eeprom def=angrysound", ask("@SM GET F NONE DOWN"));
-    TEST_ASSERT_EQUAL_STRING("@SM READY v3 fw=test slots=216 gen=0 fmt=1 pads=-", ask("@SM HELLO"));
+    TEST_ASSERT_EQUAL_STRING("@SM READY v4 fw=test slots=216 gen=0 fmt=1 pads=-", ask("@SM HELLO"));
 }
 
 static void test_set_errors() {

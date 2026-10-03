@@ -1,5 +1,5 @@
 // sm::Runtime's waiting presses (WIPDocs/TIMING_ROUND_2_DESIGN.md, section 4): a press that can't fire
-// yet (no room in the TX queue, the EEPROM mid-write, or the pass's limit of three) waits in order and
+// yet (no room in the TX queue, the EEPROM mid-write, or the pass's limit of two) waits in order and
 // fires on a later pass; none is dropped but by the old rules (over 250 ms old, or its controller gone).
 #include <unity.h>
 
@@ -130,8 +130,9 @@ static void test_a_command_waits_for_room() {
 }
 
 // Four singles wait for room (each combo's double tap is mapped, so another combo ends its wait and
-// fires it); when room comes, three fire in one pass and the fourth on the next, in the order pressed.
-static void test_waiting_presses_keep_their_order_three_a_pass() {
+// fires it); when room comes, two fire in one pass and two on the next, in the order pressed.
+static void test_waiting_presses_keep_their_order_two_a_pass() {
+    static_assert(Runtime::kMaxFiresPerPass == 2, "this test expects two presses a pass");
     mapSlot(kFUp, "fup");
     mapSlot(doubleOf(kFUp), "fup2");
     mapSlot(kFDown, "fdn");
@@ -152,10 +153,12 @@ static void test_waiting_presses_keep_their_order_three_a_pass() {
     TEST_ASSERT_EQUAL_UINT8(0, rig->runtime.firesLastPass());
     pass(1026, kNone, kNone);
     TEST_ASSERT_EQUAL_UINT8(Runtime::kMaxFiresPerPass, rig->runtime.firesLastPass());
-    TEST_ASSERT_EQUAL_UINT8(1, rig->runtime.deferredCount());
+    TEST_ASSERT_EQUAL_UINT8(2, rig->runtime.deferredCount());
+    TEST_ASSERT_TRUE(rig->tx.heldForCommand());  // the two still waiting hold the queue
     pass(1028, kNone, kNone);
-    TEST_ASSERT_EQUAL_UINT8(1, rig->runtime.firesLastPass());
+    TEST_ASSERT_EQUAL_UINT8(Runtime::kMaxFiresPerPass, rig->runtime.firesLastPass());
     TEST_ASSERT_EQUAL_UINT8(0, rig->runtime.deferredCount());
+    TEST_ASSERT_FALSE(rig->tx.heldForCommand());
     uint32_t t = 1030;
     drainOut(t);  // well before 1370, when the second UP tap's window would close
     TEST_ASSERT_EQUAL_UINT32(4, rig->wcb.commands.count);
@@ -309,7 +312,7 @@ static void test_a_deferred_press_sends_its_event() {
 int runAllTests() {
     UNITY_BEGIN();
     RUN_TEST(test_a_command_waits_for_room);
-    RUN_TEST(test_waiting_presses_keep_their_order_three_a_pass);
+    RUN_TEST(test_waiting_presses_keep_their_order_two_a_pass);
     RUN_TEST(test_a_waiting_press_is_dropped_after_250_ms);
     RUN_TEST(test_a_waiting_press_is_dropped_when_its_controller_goes);
     RUN_TEST(test_two_presses_held_by_the_eeprom_both_fire);
