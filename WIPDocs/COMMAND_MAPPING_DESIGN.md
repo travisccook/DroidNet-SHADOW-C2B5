@@ -441,17 +441,24 @@ The library has no Arduino dependency, so it builds and tests on the host.
 ## Timing and memory
 
 - **Loop time.** Worst-case time the mapping adds to one loop pass, measured on the emulated
-  ATmega2560 at 16 MHz:
-  - handling a request: 0.61 ms
-  - a pass during a SET: 0.55 ms (a double-tap slot's write also refreshes its bit in RAM)
-  - a pass during a DUMP: 0.93 ms
-  - a button press: 0.21 ms; the worst pass of a double tap: 0.43 ms
+  ATmega2560 at 16 MHz by the `test_avr_timing_*` suites (126 figures; Timer1, interrupts off,
+  Serial1 idle so each drain moves 64 bytes, 15-character keys and defaults). Timing Part A (the
+  speedups: CRC byte planes and AVR assembly, block EEPROM reads, faster line building and TX
+  copies, `sm::Uart1`; every byte sent unchanged, checked by `tools/shadowmap/test_transcripts.py`)
+  brought the figures at or over 1 ms from 61 to 5. The worst GET pass went from 2.06 ms to
+  0.83 ms, DEFAULTS' worst step from 10.7 ms to 0.12 ms, the battery report from 1.46 ms to
+  0.44 ms, four presses in one pass from 2.58 ms to 0.99 ms.
 
-  Boot reads the 144 double-tap and long-press records once, in `setup()` (8.3 ms for the 72 double
-  taps; the long-press bank adds about as much).
+  **Still over 1 ms**, all a press firing in the same pass as a request or an EEPROM write:
+  a SET in flight and a long press 1.115 ms; the worst GET, a long press and the drain 1.093 ms; a
+  press with its PRESS line mid-SET 1.073 ms; a press and a SET 1.072 ms; a press and the worst GET
+  1.014 ms. Four presses in one pass: 0.99 ms. Fixing these without changing behaviour is the
+  next timing round. The suites only report for now (`SM_TIMING_REPORT_ONLY` in `platformio.ini`);
+  remove it once every pass is under 1 ms.
 
-  A test fails if any of these reach 1 ms. Motor updates run every 25 ms. Nothing in the mapping
-  waits:
+  Boot reads the 144 double-tap and long-press records once, in `setup()`.
+
+  Motor updates run every 25 ms. Nothing in the mapping waits:
   - A lookup that would have to wait on an EEPROM write is deferred to the next pass. That
     press is dropped if its controller has gone, or if it's more than 250 ms old.
   - A request that can't be answered yet stays queued, and bytes arriving meanwhile are read
@@ -466,16 +473,19 @@ The library has no Arduino dependency, so it builds and tests on the host.
   write), REVERT 159-175 ms, DUMP 4.41 s to `END DUMP 72`. Those were v1, before double taps; expect a
   DUMP of about 12.5 s (v3, 216 slots) and a SUM of about 0.3 s now (not yet measured on the droid).
 - **Memory:**
-  - Static SRAM is 2970 bytes, down from 3801 before the runtime mapping (the tables,
-    descriptions and switch strings are gone). Double taps added 89 of them.
-  - Flash is 53,156 of 253,952 bytes.
+  - Static SRAM is 2895 bytes, down from 3801 before the runtime mapping (the tables,
+    descriptions and switch strings are gone). Double taps added 89 of them; timing Part A saved
+    21 (the hex digit table went to flash).
+  - Flash is 56,264 of 253,952 bytes (53,126 before Part A: the CRC byte planes, the assembly,
+    the Serial1 adapter).
 
 ## Testing
 
 ```bash
-pio test -e native                        # host: 137 tests (+2 AVR-only, skipped)
-pio test -e simavr --without-uploading    # emulated ATmega2560: all 139
+pio test -e native                        # host: 165 tests (+33 AVR-only, skipped)
+pio test -e simavr --without-uploading    # emulated ATmega2560: 197 (+1 host-only, skipped)
 python3 -m unittest tools/shadowmap/test_shadowmap.py   # reference client vs. the firmware logic
+python3 -m unittest tools/shadowmap/test_transcripts.py # what SHADOW sends, against 0a8b73f
 ```
 
 - **What's covered:**
@@ -486,6 +496,10 @@ python3 -m unittest tools/shadowmap/test_shadowmap.py   # reference client vs. t
   - the protocol: every verb and error, CRC handling, routing, DUMP/SUM consistency, flow control,
     button commands always fitting during a DUMP
   - runtime timing, and the real EEPROM under simavr
+  - every mapping pass's worst time (`test_avr_timing_*`, report only for now)
+  - the faster code against the code it replaced (`test_equiv_*`, `test_avr_crc_asm`,
+    `test_avr_uart1`), and transcripts of scripted sessions against goldens from `0a8b73f`
+    (`tools/shadowmap/test_transcripts.py`)
   - double taps (`test_double_tap`): exclusive firing, the window, holds, taps after a double
     tap, both controllers, drops and faults, events
   - long presses (`test_long_press`, 24 cases): the threshold, releases before and after it, with
