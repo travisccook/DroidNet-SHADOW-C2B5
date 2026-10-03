@@ -57,6 +57,8 @@ constexpr uint8_t kWideSingle = slotIndex(Ctrl::D, Mod::CIRCLE, Btn::RIGHT);
 constexpr uint16_t kGen = 65534;  // five digits, and DEFAULTS makes it 65535
 
 const char kKey15[] = "zyxwvutsrqponml";
+const char kRaw15[] = ";W2;S4PLAY:3^;T";                     // a 15-character raw command
+const char kRaw15Hex[] = "3B57323B5334504C41593A335E3B54";  // as @SM v4 carries it
 const char kDef15[] = "abcdefghijklmno";
 const char kPrefix11[] = ";W12,;Cabcd";
 const char kSuffix7[] = "abcdefg";
@@ -333,10 +335,13 @@ inline void eeHeader(uint8_t index, uint16_t seq, uint16_t gen, const char *pref
 }
 
 // A slot record written under `gen`: valid while the header has that generation, stale after.
-inline void eeSlot(uint8_t slot, uint16_t gen, const char *key) {
+// With `raw`, a raw command (kRawFlag on its first byte).
+inline void eeSlot(uint8_t slot, uint16_t gen, const char *key, bool raw = false) {
     uint8_t r[MapStore::kSlotSize];
     memset(r, 0, sizeof(r));
     strncpy(reinterpret_cast<char *>(r), key, kKeyMax);
+    if (raw)
+        r[0] = static_cast<uint8_t>(r[0] | kRawFlag);
     uint16_t crc = kCrc16Init;
     crc = crc16Update(crc, MapStore::kLayoutVersion);
     crc = crc16Update(crc, static_cast<uint8_t>(gen & 0xFF));
