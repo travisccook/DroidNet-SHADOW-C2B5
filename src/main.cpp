@@ -216,6 +216,10 @@ class UsbReplyPort final : public sm::ReplyPort {
 };
 UsbReplyPort usbReplies;
 
+// The two ports @SM requests come in on, for mapRuntime.afterButtons().
+sm::Runtime::Link<sm::Uart1> wcbLink{wcbUart, wcbLines, wcbReplies};
+sm::Runtime::Link<HardwareSerial> usbLink{Serial, usbLines, usbReplies};
+
 // SHADOW_FW_VERSION goes in @SM READY and in the announce; ?WDP,DA on the WCB shows 14 characters.
 static_assert(sizeof(SHADOW_FW_VERSION) <= 12, "SHADOW_FW_VERSION is longer than 11 characters");
 #ifdef SHADOW_WDP_ANNOUNCE
@@ -259,10 +263,11 @@ sm::PadState padState(PS3BT *pad) {
 }
 
 // Button combos to WCB stored commands (see sm::Runtime for the repeat and double-tap timing).
-void mappedButtons() {
+// Returns true when a press fired this pass.
+bool mappedButtons() {
     sm::FiredPress fired;
     if (!mapRuntime.buttons(millis(), padState(PS3NavFoot), padState(PS3NavDome), &fired))
-        return;
+        return false;
 
 #ifdef SHADOW_VERBOSE
     char name[sm::kSlotTextBuf];
@@ -275,6 +280,7 @@ void mappedButtons() {
         output += " (modifier held on the other controller)";
     output += "\r\n";
 #endif
+    return true;
 }
 
 #ifdef SHADOW_VERBOSE
@@ -310,11 +316,13 @@ void watchBatteries() {
 #endif
 }
 
-// Everything the mapping does between button presses. Runs every pass, faults included, but
-// SHADOW doesn't announce itself to the WCB while a controller fault is active.
-void serviceMapping(bool faulted) {
+// Everything the mapping does besides button presses, once per pass after the motors (faults
+// included): batteries, then one request or the background unit (sm::Runtime::afterButtons), the
+// EEPROM step and the drain. SHADOW doesn't announce itself to the WCB while a controller fault is
+// active.
+void serviceMapping(bool fired, bool faulted) {
     watchBatteries();
-    mapRuntime.service(millis(), wcbUart, !faulted);
+    mapRuntime.afterButtons(millis(), fired, faulted, wcbLink, usbLink, wcbUart);
 }
 
 // =======================================================================================
@@ -1404,22 +1412,19 @@ void loop() {
 
     // LOOP through functions from highest to lowest priority.
 
-    // Mapping edits from DroidNet (via the WCB) or the USB port. Never blocks.
-    mapRuntime.pump(wcbUart, wcbLines, wcbReplies);
-    mapRuntime.pump(Serial, usbLines, usbReplies);
-
     if (!readUSB()) {
         // We have a fault condition that we want to ensure that we do NOT process any controller data!!!
-        serviceMapping(true);
+        serviceMapping(false, true);
         printOutput();
         return;
     }
 
     footMotorDrive();
     domeDrive();
-    mappedButtons();
+    const bool fired = mappedButtons();
     toggleSettings();
-    serviceMapping(false);
+    // Mapping edits from DroidNet (via the WCB) or the USB port, after the motors. Never blocks.
+    serviceMapping(fired, false);
     printOutput();
 
     // If dome automation is enabled - Call function

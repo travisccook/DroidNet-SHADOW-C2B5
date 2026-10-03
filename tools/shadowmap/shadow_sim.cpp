@@ -141,6 +141,21 @@ uint32_t now = 0;
 uint8_t footBattery = 0;
 uint8_t domeBattery = 0;
 
+// The simulator has no USB port: a link with nothing to read.
+struct NoInput {
+    int available() { return 0; }
+    int read() { return -1; }
+};
+class NullReplies final : public sm::ReplyPort {
+  public:
+    bool canSend(uint8_t) override { return false; }
+    void send(const char *, uint8_t) override {}
+    bool requiresCrc() const override { return false; }
+};
+NoInput noUsb;
+sm::LineReader noUsbLines;
+NullReplies noUsbReplies;
+
 struct Shadow {
     explicit Shadow(FileEeprom &eeprom)
         : store(eeprom, defaultButtonMappings, defaultButtonMappingsCount), port(tx), protocol(store, "sim"),
@@ -159,11 +174,11 @@ struct Shadow {
 
 void pass(Shadow &s, FileEeprom &eeprom, StdoutUart &uart, InputQueue &in, sm::PadState foot, sm::PadState dome) {
     in.arrive();
-    s.runtime.pump(in, s.reader, s.port);
     sm::FiredPress fired;
-    s.runtime.buttons(now, foot, dome, &fired);
+    const bool any = s.runtime.buttons(now, foot, dome, &fired);  // main.cpp's order: presses, then serviceMapping()
     s.runtime.batteries(now, foot.connected, footBattery, dome.connected, domeBattery);
-    s.runtime.service(now, uart);
+    s.runtime.afterButtons(now, any, false, sm::Runtime::Link<InputQueue>{in, s.reader, s.port},
+                           sm::Runtime::Link<NoInput>{noUsb, noUsbLines, noUsbReplies}, uart);
     eeprom.tick();
     uart.refill();
     now += kPassMs;
