@@ -271,10 +271,10 @@ record the results on the PR, and fix anything that breaks.
    - foot drive and dome
    - PS+✕ / PS+○ disable and enable the stick
    - foot L3+L1 toggles over-speed, and dome L3+L1 does **not** (it fires `frontholocenter`)
-6. **Every mapped combo still sends what it used to.** `SHADOW_VERBOSE` is off (it blocks the loop); watch the
-   PRESS events instead: send `@SM EVENTS 1` on the USB port to see `@SM PRESS F L1 UP extremehappysou default`;
-   PS + direction shows `- reserved`. For the old `ACTIVATED:` log, build with `PLATFORMIO_BUILD_FLAGS=-DSHADOW_VERBOSE`
-   for that bench session.
+6. **Every mapped combo still sends what it used to.** `SHADOW_VERBOSE` is off (it blocks the loop); watch PRESS
+   events instead: `python3 tools/shadowmap/shadowmap.py --usb <port> watch` shows each event as
+   `@SM PRESS <ctrl> <mod> <btn> <key> <source>` (or `@SM EVENTS 1` on the USB port). PS + direction is
+   reserved. For the old `ACTIVATED:` log, build with `PLATFORMIO_BUILD_FLAGS=-DSHADOW_VERBOSE`.
 7. **The announce.** Use the least invasive check first:
    - on c2-body, run `curl -s 'http://localhost/api/serial/history?port=/dev/ttyUSB0&limit=500' | grep WDP-DA` and
      look for `[WDP-DA] S<x>: Shadow fw <commit>`. That gives SHADOW's S-port `x`.
