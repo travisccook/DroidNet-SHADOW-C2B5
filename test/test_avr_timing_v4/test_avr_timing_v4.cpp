@@ -399,6 +399,132 @@ static void test_request_as_a_write_finishes() {
     TEST_ASSERT_EQUAL_UINT16(65535, store.generation());
 }
 
+namespace {
+
+constexpr PadState kFootOff = {false, 0};
+
+// Bytes queued for the background unit's lines, route (HELLO 20) and CR included.
+constexpr uint8_t kCtlBytes = kRoute + 21 + 1;                               // @SM CTL F 1 *<crc>
+constexpr uint8_t kAnnounceBytes = Runtime::kAnnounceOverhead + sizeof(kFw11) - 1;  // bare, no route
+
+// Takes a line's length without sending it.
+class LenPort final : public ReplyPort {
+  public:
+    bool canSend(uint8_t) override { return true; }
+    void send(const char *, uint8_t len) override { n = len; }
+    bool requiresCrc() const override { return true; }
+    uint8_t n = 0;
+};
+
+// When the first announce comes due after startAnnounce(at, seed): Runtime::between()'s xorshift.
+uint32_t firstAnnounceDelay(uint32_t seed) {
+    uint32_t r = seed;
+    r ^= r << 13;
+    r ^= r >> 17;
+    r ^= r << 5;
+    return Runtime::kFirstAnnounceMinMs + r % (Runtime::kFirstAnnounceMaxMs - Runtime::kFirstAnnounceMinMs + 1);
+}
+
+// The background unit's pass M with a write's verify-and-finish step in it (a raw SET of a
+// long-press slot, or DEFAULTS), and as much other background work as fits in one pass. Every line
+// the unit sends waits for room for a kMaxLine reply (139 bytes free) except the announce (78), so
+// from an empty queue one pass sends at most:
+//   - with a CTL event due: the CTL line, then the announce (the battery report no longer fits); or
+//   - with no CTL event: the battery report (CRIT/CRIT, 7-digit up=; an announce due would go first
+//     and leave it no room).
+// `owed`: M is the pass owed to the background unit after a request (EVENTS 1, a short reply that
+// the drain has sent), in which the finishing step was put off. Otherwise M reads a full budget of
+// other traffic (no request completes) and the step comes due in it. Asserts what went out.
+WorstPass backgroundWithFinish(bool owed, bool defaults, bool ctlAndAnnounce) {
+    rawState(false);
+    const PadState pre = ctlAndAnnounce ? kFootOff : kNone;  // the foot connects in M: CTL F 1
+    for (uint8_t i = 0; i < 6; ++i)
+        loopPass(gNow += 2, pre, kNone);  // CTL F 0 (if any) goes out
+    TEST_ASSERT_EQUAL_UINT8(0, tx.used());
+    const uint32_t m = gNow + 2000;
+    if (ctlAndAnnounce) {
+        const uint32_t seed = 7;
+        runtime.startAnnounce(m - firstAnnounceDelay(seed), seed);  // due in M
+    } else {
+        runtime.startBattery(port, gNow);
+        loopPass(m - BatteryWatch::kFirstMs, pre, kNone, 1, 1);  // CRIT first seen: taken in M
+    }
+    BudgetLine req;
+    if (owed) {
+        budgetLine(PSTR("@SM EVENTS 1"), req);
+        TEST_ASSERT_EQUAL_UINT8(0, req.lead[0]);
+    }
+    const auto toFinish = [&] {
+        if (defaults)
+            TEST_ASSERT_TRUE(store.beginDefaults() == MapStore::Result::Ok);
+        else
+            TEST_ASSERT_TRUE(store.beginSet(kL2LeftLong, kRaw15, true) == MapStore::Result::Ok);
+        for (uint8_t i = 0; i < 60 && !store.finishDue(); ++i)
+            store.step();
+        TEST_ASSERT_TRUE(store.finishDue());
+        TEST_ASSERT_TRUE(io.ready());
+    };
+    if (owed) {
+        toFinish();
+        SerialPoke::inject(Serial1, req.budget);
+        loopPass(m - 2, pre, kNone);
+        TEST_ASSERT_TRUE(runtime.lastWork() == Runtime::Work::Request);
+        TEST_ASSERT_TRUE(store.finishDue());  // put off
+    } else {
+        loopPass(m - 2, pre, kNone);
+        TEST_ASSERT_TRUE(runtime.lastWork() == Runtime::Work::Background);
+        toFinish();
+        char junk[Runtime::kMaxBytesPerPass + 1];
+        memset(junk, 'j', Runtime::kMaxBytesPerPass);
+        junk[Runtime::kMaxBytesPerPass] = '\0';
+        SerialPoke::inject(Serial1, junk);
+    }
+    TEST_ASSERT_EQUAL_UINT8(0, tx.used());
+    WorstPass w;
+    const uint8_t before = tx.used();
+    const uint8_t batt = ctlAndAnnounce ? 0 : 1;
+    loopPass(m, kNone, kNone, batt, batt);
+    w.add(gLast);
+    TEST_ASSERT_TRUE(runtime.lastWork() == Runtime::Work::Background);
+    TEST_ASSERT_TRUE(gFinishing);
+    TEST_ASSERT_FALSE(store.finishDue());  // finished in M
+    TEST_ASSERT_EQUAL_INT(0, Serial1.available());
+    if (ctlAndAnnounce) {
+        TEST_ASSERT_EQUAL_INT16(kCtlBytes + kAnnounceBytes, queuedBy(before));
+    } else {
+        TEST_ASSERT_TRUE(runtime.domeBattery().level() == BattLevel::Crit);
+        LenPort len;
+        TEST_ASSERT_TRUE(protocol.sendBattery(len));  // the line M sent
+        TEST_ASSERT_EQUAL_INT16(kRoute + len.n + 1, queuedBy(before));
+    }
+    SerialPoke::clearRx(Serial1);
+    wcbLines.consume();
+    gNow = m;
+    settle(gNow);
+    TEST_ASSERT_FALSE(store.busy());
+    return w;
+}
+
+}  // namespace
+
+// The background unit's worst passes with a write's finishing step in them.
+static void test_background_as_a_write_finishes() {
+    gNow = 4294900000UL;  // a 7-digit up= in the battery report
+    PGM_P const names[] = {
+        PSTR("v4 owed pass after a request: CTL + announce + a raw SET's put-off finishing step + drain"),
+        PSTR("v4 owed pass after a request: CTL + announce + DEFAULTS' put-off finishing step + drain"),
+        PSTR("v4 owed pass after a request: battery report (CRIT/CRIT) + a raw SET's put-off finishing step + drain"),
+        PSTR("v4 owed pass after a request: battery report (CRIT/CRIT) + DEFAULTS' put-off finishing step + drain"),
+        PSTR("v4 pass: 32 junk bytes read + CTL + announce + a raw SET's finishing step + drain"),
+        PSTR("v4 pass: 32 junk bytes read + CTL + announce + DEFAULTS' finishing step + drain"),
+        PSTR("v4 pass: 32 junk bytes read + battery report (CRIT/CRIT) + a raw SET's finishing step + drain"),
+        PSTR("v4 pass: 32 junk bytes read + battery report (CRIT/CRIT) + DEFAULTS' finishing step + drain"),
+    };
+    for (uint8_t k = 0; k < 8; ++k)
+        recordPass(names[k], backgroundWithFinish((k & 4) == 0, (k & 1) != 0, (k & 2) == 0));
+    TEST_ASSERT_TRUE(gNow < 4294967000UL);  // no millis() wrap in between
+}
+
 static void test_every_pass_is_under_1_ms() { checkBudget(); }
 
 #else
@@ -409,6 +535,7 @@ static void test_one_raw_press() { TEST_IGNORE_MESSAGE("AVR only (pio test -e si
 static void test_raw_presses_together() { TEST_IGNORE_MESSAGE("AVR only (pio test -e simavr)"); }
 static void test_raw_set_meets_raw_press() { TEST_IGNORE_MESSAGE("AVR only (pio test -e simavr)"); }
 static void test_request_as_a_write_finishes() { TEST_IGNORE_MESSAGE("AVR only (pio test -e simavr)"); }
+static void test_background_as_a_write_finishes() { TEST_IGNORE_MESSAGE("AVR only (pio test -e simavr)"); }
 static void test_every_pass_is_under_1_ms() { TEST_IGNORE_MESSAGE("AVR only (pio test -e simavr)"); }
 
 #endif
@@ -421,6 +548,7 @@ int runAllTests() {
     RUN_TEST(test_raw_presses_together);
     RUN_TEST(test_raw_set_meets_raw_press);
     RUN_TEST(test_request_as_a_write_finishes);
+    RUN_TEST(test_background_as_a_write_finishes);
     RUN_TEST(test_every_pass_is_under_1_ms);
     return UNITY_END();
 }
