@@ -1,7 +1,8 @@
 // Worst-case time of the runtime's per-pass work: button presses (the command and the PRESS
 // event), the announce, the battery report, reading request bytes from the real Serial1, the
-// drain into the real Serial1, and whole loop() passes of the mapping (pump, pump, buttons,
-// batteries, service) with requests, presses and EEPROM writes in flight. AVR only (simavr);
+// drain into the real Serial1, and whole loop() passes of the mapping (buttons, batteries, then
+// afterButtons: one request or the background unit, the EEPROM step and the drain) with requests,
+// presses and EEPROM writes in flight. AVR only (simavr);
 // see test/support/sm_avr_timing.h for the method.
 #include <unity.h>
 
@@ -221,13 +222,22 @@ static void test_line_input() {
     settle(now);
 
     // Two requests in the RX buffer at once (a second sender, or a resend landing behind a
-    // request): EVENTS 1 and the worst GET.
+    // request): EVENTS 1 and the worst GET. pump() takes one a call, so they take two passes (the
+    // first one's reply drained between them); the worse of the two.
     crcLine(PSTR("@SM EVENTS 1"));
     SerialPoke::inject(Serial1, gLine);
     SerialPoke::inject(Serial1, "\r");
     injectLine(PSTR("@SM GET F CIRCLE RIGHTL"));
-    t = ticksOf([] { runtime.pump(SMT_WCB_UART, wcbLines, port); });
-    record(PSTR("pump(): two requests in the RX buffer (EVENTS 1 + the worst GET)"), t);
+    Worst two;
+    bool took = false;
+    two.add(ticksOf([&] { took = runtime.pump(SMT_WCB_UART, wcbLines, port); }));
+    TEST_ASSERT_TRUE(took);
+    TEST_ASSERT_TRUE(SMT_WCB_UART.available() > 0);  // the GET waits for the next call
+    drainAll();
+    two.add(ticksOf([&] { took = runtime.pump(SMT_WCB_UART, wcbLines, port); }));
+    TEST_ASSERT_TRUE(took);
+    TEST_ASSERT_EQUAL_INT(0, SMT_WCB_UART.available());
+    record(PSTR("pump(): two requests in the RX buffer, one a call (EVENTS 1, then the worst GET)"), two.ticks);
     settle(now);
 
     // A 72-char line split over two passes; the second ends it (bad CRC).
@@ -272,7 +282,7 @@ static void test_uart_drain() {
     SerialPoke::dropTx1();
 }
 
-// Whole loop() passes of the mapping (pump, pump, buttons, batteries, service into Serial1).
+// Whole loop() passes of the mapping (buttons, batteries, afterButtons draining into Serial1).
 static void test_loop_passes() {
     Serial1.begin(9600);
 
@@ -363,6 +373,7 @@ static void test_loop_passes() {
             sweep.add();
             at += 2;
         }
+        TEST_ASSERT_FALSE(wcbLines.ready());  // the SET was taken
         TEST_ASSERT_FALSE(store.busy());
         TEST_ASSERT_FALSE(protocol.opInProgress());
     }
@@ -371,19 +382,27 @@ static void test_loop_passes() {
     if (sweep.t2.passes > 0)
         recordPass(PSTR("loop pass: SET finishing + long press fires, swept"), sweep.t2, kT2);
 
-    // DEFAULTS in flight, with presses.
+    // DEFAULTS in flight, with presses while it writes. They start once DEFAULTS has been taken and
+    // stop when the write is done: a press every other pass would otherwise keep the TX queue too
+    // full for its reply (the harness drains 63 bytes a pass; on the droid presses are a second apart).
     worstState();
     io.busyPasses = 2;
     injectLine(PSTR("@SM DEFAULTS"));
     ClassWorst defaults;
     now = 400000UL;
-    for (uint16_t i = 0; i < 400 && (store.busy() || protocol.opInProgress() || i < 4); ++i) {
-        const bool press = (i & 1) == 0;
+    for (uint16_t i = 0; i < 400; ++i) {
+        const bool taken = !wcbLines.ready() && Serial1.available() == 0;
+        if (taken && !store.busy() && !protocol.opInProgress() && i >= 4)
+            break;
+        const bool press = (i & 1) == 0 && taken && store.busy();
         now += press ? 1100 : 10;
         loopPass(now, press ? kFootCircle : kNone, press ? kDomeRight : kNone);
         defaults.add();
     }
     io.busyPasses = 0;
+    TEST_ASSERT_TRUE(defaults.t1.passes + defaults.t2.passes < 400);  // done, reply sent
+    TEST_ASSERT_FALSE(wcbLines.ready());
+    TEST_ASSERT_FALSE(protocol.opInProgress());
     TEST_ASSERT_FALSE(store.busy());
     TEST_ASSERT_EQUAL_UINT16(65535, store.generation());
     recordPass(PSTR("loop pass: DEFAULTS in flight (paced EEPROM) + presses"), defaults.t1);

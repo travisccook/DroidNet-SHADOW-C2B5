@@ -101,12 +101,13 @@ void worstState(bool events = true) {
     protocol.setPads(true, true);
 }
 
-// One loop() pass of the mapping, in main.cpp's order, with Serial1's TX ring empty first (the
-// UART has sent everything: the most the drain can write in a pass). Each part is timed on its
-// own; the pass is their sum.
+// One loop() pass of the mapping, in main.cpp's order (after the motors): buttons(), batteries(),
+// then afterButtons() (one request or the background unit, by the pass rule, then the EEPROM step
+// and the drain), with Serial1's TX ring empty first (the UART has sent everything: the most the
+// drain can write in a pass). Each part is timed on its own; the pass is their sum.
 struct PassParts {
-    uint16_t wcbPump, usbPump, buttons, batteries, service;
-    uint16_t total() const { return static_cast<uint16_t>(wcbPump + usbPump + buttons + batteries + service); }
+    uint16_t buttons, batteries, after;
+    uint16_t total() const { return static_cast<uint16_t>(buttons + batteries + after); }
 };
 struct WorstPass {
     PassParts parts = {};
@@ -132,11 +133,12 @@ uint16_t loopPass(uint32_t now, const PadState &foot, const PadState &dome, uint
     SerialPoke::dropTx1();
     io.tick();
     gFinishing = store.finishDue();
-    gLast.wcbPump = ticksOf([] { runtime.pump(SMT_WCB_UART, wcbLines, port); });
-    gLast.usbPump = ticksOf([] { runtime.pump(Serial, usbLines, usbPort); });
     gLast.buttons = ticksOf([&] { gAny = runtime.buttons(now, foot, dome, &gFired); });
     gLast.batteries = ticksOf([&] { runtime.batteries(now, foot.connected, footBatt, dome.connected, domeBatt); });
-    gLast.service = ticksOf([&] { runtime.service(now, SMT_WCB_UART, mayAnnounce); });
+    gLast.after = ticksOf([&] {
+        runtime.afterButtons(now, gAny, !mayAnnounce, Runtime::Link<Uart1>{SMT_WCB_UART, wcbLines, port},
+                             Runtime::Link<HardwareSerial>{Serial, usbLines, usbPort}, SMT_WCB_UART);
+    });
     return gLast.total();
 }
 
@@ -155,17 +157,16 @@ struct ClassWorst {
 void recordPass(PGM_P what, const WorstPass &w, uint8_t cls = kT1) {
     record(what, w.ticks(), cls);
     const PassParts &p = w.parts;
-    say(PSTR("  parts: WCB pump %u.%u, USB pump %u.%u, buttons %u.%u, batteries %u.%u, service %u.%u us (%u passes)"),
-        p.wcbPump / 2, (p.wcbPump & 1) * 5, p.usbPump / 2, (p.usbPump & 1) * 5, p.buttons / 2, (p.buttons & 1) * 5,
-        p.batteries / 2, (p.batteries & 1) * 5, p.service / 2, (p.service & 1) * 5, w.passes);
+    say(PSTR("  parts: buttons %u.%u, batteries %u.%u, after %u.%u us (%u passes)"), p.buttons / 2,
+        (p.buttons & 1) * 5, p.batteries / 2, (p.batteries & 1) * 5, p.after / 2, (p.after & 1) * 5, w.passes);
 }
 
 // Passes with nothing held until the mapping has nothing left to do (no request waiting, no write,
-// no operation, nothing queued for the UART); their worst goes into `w`.
+// no operation, nothing queued for the UART, no press waiting); their worst goes into `w`.
 void settle(uint32_t &now, WorstPass *w = nullptr, uint16_t maxPasses = 3000) {
     for (uint16_t i = 0; i < maxPasses; ++i) {
         if (!wcbLines.ready() && SMT_WCB_UART.available() == 0 && !store.busy() && !protocol.opInProgress() &&
-            tx.used() == 0 && !runtime.tapPending())
+            tx.used() == 0 && !runtime.tapPending() && runtime.deferredCount() == 0)
             return;
         now += 2;
         loopPass(now, kNone, kNone);

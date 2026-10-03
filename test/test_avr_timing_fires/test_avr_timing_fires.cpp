@@ -1,7 +1,9 @@
 // Passes where more than one heavy thing can't be moved to another pass (see
 // test/support/sm_avr_timing.h for the classes): a press fired as the EEPROM writer finishes a
-// job (T2), two presses in one pass (T2), and three or four (T3, report only). Presses can't wait
-// for a later pass: their timing rules (WIPDocs/COMMAND_MAPPING_DESIGN.md) are fixed. AVR only.
+// job (T2), two presses in one pass (T2), and three (T3). Presses can't wait for a later pass
+// (their timing rules, WIPDocs/COMMAND_MAPPING_DESIGN.md, are fixed) except that at most
+// Runtime::kMaxFiresPerPass fire in one pass and a press that finds no room in the TX queue waits:
+// those wait one pass, in order (WIPDocs/TIMING_ROUND_2_DESIGN.md, section 4). AVR only.
 #include <unity.h>
 
 #include <ShadowMap.h>
@@ -178,11 +180,22 @@ WorstPass manyPresses(uint8_t fires, bool finishing) {
     WorstPass w;
     loopPass(p, kFootRight, kDomeCircleDownHeld);
     TEST_ASSERT_TRUE(gAny);
-    TEST_ASSERT_EQUAL_UINT8(kWide, gFired.slot);  // the last of them
     TEST_ASSERT_TRUE(gFinishing == finishing);
     TEST_ASSERT_FALSE(store.finishDue());
     w.add(gLast);
-    gNow = p;
+    if (fires > Runtime::kMaxFiresPerPass) {
+        // Three fire; the long press (the last of them) waits one pass in order.
+        TEST_ASSERT_EQUAL_UINT8(Runtime::kMaxFiresPerPass, runtime.firesLastPass());
+        TEST_ASSERT_EQUAL_UINT8(1, runtime.deferredCount());
+        loopPass(p + 2, kFootRight, kDomeCircleDownHeld);
+        TEST_ASSERT_TRUE(gAny);
+        TEST_ASSERT_EQUAL_UINT8(0, runtime.deferredCount());
+        w.add(gLast);
+    } else {
+        TEST_ASSERT_EQUAL_UINT8(fires, runtime.firesLastPass());
+    }
+    TEST_ASSERT_EQUAL_UINT8(kWide, gFired.slot);  // the last of them
+    gNow = p + 2;
     loopPass(gNow += 2, kNone, kNone);
     settle(gNow);
     return w;
@@ -192,8 +205,32 @@ WorstPass manyPresses(uint8_t fires, bool finishing) {
 
 static void test_three_and_four_presses() {
     recordPass(PSTR("three presses in one pass (one deferred)"), manyPresses(3, false), kT3);
-    recordPass(PSTR("four presses in one pass (one deferred)"), manyPresses(4, false), kT3);
+    recordPass(PSTR("four presses due in one pass (three fire, one waits a pass)"), manyPresses(4, false), kT3);
     recordPass(PSTR("three presses + a write's last step"), manyPresses(3, true), kT3);
+}
+
+// Presses that find the TX queue full wait in order and go as the drain frees room: every pass from
+// the one they come due in until the last has fired.
+static void test_presses_waiting_for_room() {
+    worstState();
+    settle(gNow);
+    char fill[140];
+    memcpy(fill, ";S0", 3);
+    memset(fill + 3, 'x', sizeof(fill) - 3);
+    TEST_ASSERT_TRUE(tx.pushLine2(fill, sizeof(fill) - 1, nullptr, 0));  // 20 bytes free: no command fits
+    gNow += 1100;
+    WorstPass w;
+    loopPass(gNow, kFootCircle, kDomeRight);  // D CIRCLE RIGHT (from=F): no room, it waits
+    TEST_ASSERT_FALSE(gAny);
+    TEST_ASSERT_EQUAL_UINT8(1, runtime.deferredCount());
+    w.add(gLast);
+    for (uint8_t i = 0; i < 10 && runtime.deferredCount() > 0; ++i) {
+        loopPass(gNow += 2, kFootCircle, kDomeRight);
+        w.add(gLast);
+    }
+    TEST_ASSERT_EQUAL_UINT8(0, runtime.deferredCount());
+    settle(gNow);
+    recordPass(PSTR("a press waiting for room, every pass until it fires"), w);
 }
 
 static void test_every_pass_is_under_1_ms() { checkBudget(); }
@@ -203,6 +240,7 @@ static void test_every_pass_is_under_1_ms() { checkBudget(); }
 static void test_press_as_a_write_finishes() { TEST_IGNORE_MESSAGE("AVR only (pio test -e simavr)"); }
 static void test_two_presses() { TEST_IGNORE_MESSAGE("AVR only (pio test -e simavr)"); }
 static void test_three_and_four_presses() { TEST_IGNORE_MESSAGE("AVR only (pio test -e simavr)"); }
+static void test_presses_waiting_for_room() { TEST_IGNORE_MESSAGE("AVR only (pio test -e simavr)"); }
 static void test_every_pass_is_under_1_ms() { TEST_IGNORE_MESSAGE("AVR only (pio test -e simavr)"); }
 
 #endif
@@ -212,6 +250,7 @@ int runAllTests() {
     RUN_TEST(test_press_as_a_write_finishes);
     RUN_TEST(test_two_presses);
     RUN_TEST(test_three_and_four_presses);
+    RUN_TEST(test_presses_waiting_for_room);
     RUN_TEST(test_every_pass_is_under_1_ms);
     return UNITY_END();
 }

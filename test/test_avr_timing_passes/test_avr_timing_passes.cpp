@@ -147,6 +147,8 @@ static void test_dump_and_sum() {
             loopPass(gNow, kNone, kNone);
             w.add(gLast);
         }
+        TEST_ASSERT_FALSE(wcbLines.ready());  // answered (ERR busy) within the 20 passes
+        TEST_ASSERT_TRUE(protocol.opInProgress());
         settle(gNow);
         recordPass(PSTR("intake pass: SET during a DUMP (ERR busy, slot named)"), w);
     }
@@ -261,17 +263,23 @@ static void test_one_press() {
     }
 
     // Presses while a SET is mid-write (the EEPROM ready between its bytes, so the slot is read).
+    // They start once the SET has been taken: a press every third pass would otherwise keep the TX
+    // queue too full for its reply in every pass that may take a request (the harness drains 63
+    // bytes a pass; on the droid presses are a second apart).
     worstState();
     io.busyPasses = 2;
     settle(gNow);
     ClassWorst w;
     injectLine(PSTR("@SM SET D L2 LEFTL zyxwvutsrqponml"));
     for (uint16_t i = 0; i < 160; ++i) {
-        const bool press = (i % 3) == 0;
+        const bool taken = !wcbLines.ready() && Serial1.available() == 0;
+        const bool press = (i % 3) == 0 && taken;
         gNow += press ? 1100 : 2;
         loopPass(gNow, press ? kFootCircle : kNone, press ? kDomeRight : kNone);
         w.add();
     }
+    TEST_ASSERT_FALSE(wcbLines.ready());  // the SET was taken
+    TEST_ASSERT_FALSE(store.busy());      // and written within the 160 passes
     settle(gNow);
     recordPass(PSTR("press pass: single with PRESS, a SET mid-write"), w.t1);
     if (w.t2.passes > 0)
