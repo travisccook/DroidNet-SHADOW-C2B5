@@ -14,11 +14,6 @@ using namespace sm;
 
 namespace {
 
-struct NoInput {
-    int available() { return 0; }
-    int read() { return -1; }
-};
-
 struct Rig {
     FakeEeprom eeprom;
     MapStore store{eeprom, defaultButtonMappings, defaultButtonMappingsCount};
@@ -28,19 +23,22 @@ struct Rig {
     Runtime runtime{store, protocol, tx, "2.0.0"};
     WcbSim wcb;
     LineReader reader;
-    NoInput in;
+    NoSerial in;
     FiredPress fired = {};
 };
 
 Rig *rig = nullptr;
+NoSerial noUsb;
+LineReader noUsbLines;
+NullReplyPort noUsbReplies;
 
 const PadState kOff = {false, 0};
 const uint8_t kUp2 = slotIndex(Ctrl::F, Mod::NONE, Btn::UP, Tap::DOUBLE);
 
 bool pass(uint32_t t, PadState foot, PadState dome = kOff) {
-    rig->runtime.pump(rig->in, rig->reader, rig->wcbPort);
     const bool fired = rig->runtime.buttons(t, foot, dome, &rig->fired);
-    rig->runtime.service(t, rig->wcb);
+    rig->runtime.afterButtons(t, fired, false, Runtime::Link<NoSerial>{rig->in, rig->reader, rig->wcbPort},
+                              Runtime::Link<NoSerial>{noUsb, noUsbLines, noUsbReplies}, rig->wcb);
     rig->eeprom.tick();
     rig->wcb.refill();
     return fired;

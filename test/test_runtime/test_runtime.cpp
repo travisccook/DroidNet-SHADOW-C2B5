@@ -53,15 +53,18 @@ struct Rig {
 };
 
 Rig *rig = nullptr;
+NoSerial noUsb;
+LineReader noUsbLines;
+NullReplyPort noUsbReplies;
 
 const PadState kOff = {false, 0};
 
-// One loop() pass at time `t`: requests in, buttons, service out.
+// One loop() pass at time `t` in main.cpp's order: buttons, then the rest of the mapping's pass.
 bool pass(uint32_t t, PadState foot, PadState dome = kOff) {
     rig->now = t;
-    rig->runtime.pump(rig->in, rig->reader, rig->wcbPort);
     const bool fired = rig->runtime.buttons(t, foot, dome, &rig->fired);
-    rig->runtime.service(t, rig->wcb);
+    rig->runtime.afterButtons(t, fired, false, Runtime::Link<FakeSerialIn>{rig->in, rig->reader, rig->wcbPort},
+                              Runtime::Link<NoSerial>{noUsb, noUsbLines, noUsbReplies}, rig->wcb);
     rig->eeprom.tick();
     rig->wcb.refill();
     return fired;
@@ -363,8 +366,10 @@ static void test_events_follow_presses_and_controllers() {
     withCrc("@SM EVENTS 1", req, sizeof(req));
     rig->in.load(req);
     rig->in.data[rig->in.len++] = '\r';
-    pass(0, held(0));
-    pass(1, held(0));
+    pass(0, kOff);  // buttons() now runs before the request is read: with EVENTS already on,
+    pass(1, kOff);  // the foot has to show up after the request pass for its CTL event to follow
+    pass(2, held(0));
+    pass(3, held(0));  // the background pass that sends the CTL event
     TEST_ASSERT_TRUE(piSawRecently("@SM OK EVENTS 1"));
     TEST_ASSERT_TRUE(piSawRecently("@SM CTL F 1"));  // the foot showed up after EVENTS
 

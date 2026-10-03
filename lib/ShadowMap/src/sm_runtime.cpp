@@ -194,6 +194,13 @@ bool Runtime::fire(uint8_t slot, bool modFromOther, FiredPress *fired) {
     return true;
 }
 
+void Runtime::background(uint32_t nowMs, bool mayAnnounce) {
+    protocol_.service();
+    if (mayAnnounce)
+        announce(nowMs);
+    reportBattery(nowMs);
+}
+
 void Runtime::startAnnounce(uint32_t nowMs, uint32_t seed) {
     rng_ = seed != 0 ? seed : 0x2545F491UL;  // xorshift can't start from 0
     nextAnnounce_ = nowMs + between(kFirstAnnounceMinMs, kFirstAnnounceMaxMs);

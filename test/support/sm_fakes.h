@@ -261,6 +261,20 @@ class WcbSim {
     size_t len_ = 0;
 };
 
+// A serial port with nothing to read (the USB link in suites that only drive the WCB).
+struct NoSerial {
+    int available() { return 0; }
+    int read() { return -1; }
+};
+
+// A reply port nothing is sent to (paired with NoSerial).
+class NullReplyPort final : public sm::ReplyPort {
+  public:
+    bool canSend(uint8_t) override { return false; }
+    void send(const char *, uint8_t) override {}
+    bool requiresCrc() const override { return false; }
+};
+
 // A reply port that records lines directly (the USB side of SHADOW).
 class CapturePort final : public sm::ReplyPort {
   public:

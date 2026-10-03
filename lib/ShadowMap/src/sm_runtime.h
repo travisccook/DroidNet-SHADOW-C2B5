@@ -88,33 +88,47 @@ class Runtime {
     uint8_t firesLastPass() const { return firesThisPass_; }
     uint16_t droppedPresses() const { return droppedPresses_; }  // the waiting list was full (never expected)
 
-    // Reads @SM requests from `port` without blocking, at most kMaxBytesPerPass bytes a pass.
-    // A request that can't be answered yet (reply queue full, EEPROM busy) stays in `reader`
-    // for the next pass; bytes arriving meanwhile are read and dropped so the UART's RX buffer
-    // can't overflow. The Pi sends one request at a time and resends after a timeout.
+    // A serial port's input, its line reader and where its replies go, for afterButtons().
     template <class Serial>
-    void pump(Serial &port, LineReader &reader, ReplyPort &replies) {
+    struct Link {
+        Serial &port;
+        LineReader &lines;
+        ReplyPort &replies;
+    };
+
+    // What the last afterButtons() did besides presses.
+    enum class Work : uint8_t { Presses, Request, Background };
+    Work lastWork() const { return lastWork_; }
+
+    // Reads @SM requests from `port` without blocking, at most kMaxBytesPerPass bytes, and handles at
+    // most one. Returns true when it handled one: answered it, or found it can't be answered yet (reply
+    // queue full, EEPROM busy), in which case it stays in `reader` for a later pass and bytes arriving
+    // meanwhile are read and dropped so the UART's RX buffer can't overflow. The Pi sends one request at
+    // a time and resends after a timeout.
+    template <class Serial>
+    bool pump(Serial &port, LineReader &reader, ReplyPort &replies) {
         uint8_t budget = kMaxBytesPerPass;
-        while (budget > 0) {
+        while (true) {
             if (reader.ready()) {
-                if (!protocol_.handleLine(reader.line(), replies)) {
-                    while (budget > 0) {
-                        uint8_t n = batch(port.available(), budget);
-                        if (n == 0)
-                            return;
-                        budget = static_cast<uint8_t>(budget - n);
-                        for (; n > 0; --n)
-                            reader.discard(static_cast<char>(port.read()));
-                    }
-                    return;
+                if (protocol_.handleLine(reader.line(), replies)) {
+                    reader.consume();
+                    return true;
                 }
-                reader.consume();
+                while (budget > 0) {
+                    uint8_t n = batch(port.available(), budget);
+                    if (n == 0)
+                        break;
+                    budget = static_cast<uint8_t>(budget - n);
+                    for (; n > 0; --n)
+                        reader.discard(static_cast<char>(port.read()));
+                }
+                return true;
             }
             // As many bytes as are waiting (up to the budget), with one available() call: a line
             // that completes stops the batch so it's handled before the next byte is read.
             uint8_t n = batch(port.available(), budget);
             if (n == 0)
-                return;
+                return false;
             for (; n > 0; --n) {
                 --budget;
                 if (reader.feed(static_cast<char>(port.read())))
@@ -123,18 +137,51 @@ class Runtime {
         }
     }
 
-    // Every pass, faults included: finishes protocol work, advances EEPROM writes, sends the
-    // announce and battery report when due, and hands queued bytes to the WCB's UART. Pass
-    // `mayAnnounce` false while a controller fault is active: a due announce then waits for
-    // the fault to clear. Battery reports carry on through a fault.
-    template <class Serial>
-    void service(uint32_t nowMs, Serial &wcb, bool mayAnnounce = true) {
-        protocol_.service();
+    // The background unit: protocol work (a DUMP line, a SUM step, a write's reply, a CTL event), the
+    // announce (not while `mayAnnounce` is false: a controller fault; a due announce then waits for the
+    // fault to clear), and the battery report (which carries on through a fault). Each waits for room.
+    void background(uint32_t nowMs, bool mayAnnounce);
+
+    // Every pass, faults included: the EEPROM writer's step, then queued bytes to the WCB's UART.
+    template <class Out>
+    void finishPass(Out &wcb) {
         store_.step();
-        if (mayAnnounce)
-            announce(nowMs);
-        reportBattery(nowMs);
         tx_.drain(wcb);
+    }
+
+    // background() and finishPass() in one call, with no pass rule: for tests and tools that drive one
+    // thing at a time. loop() uses afterButtons().
+    template <class Out>
+    void service(uint32_t nowMs, Out &wcb, bool mayAnnounce = true) {
+        background(nowMs, mayAnnounce);
+        finishPass(wcb);
+    }
+
+    // The rest of the mapping's pass, once per loop() pass after buttons() (faults included, with
+    // `fired` false: buttons() isn't called then). WIPDocs/TIMING_ROUND_2_DESIGN.md, section 3:
+    //   - a pass that fired a press reads no request and runs no background unit;
+    //   - the first pass without a press after one that handled a request runs the background unit;
+    //   - any other pass handles at most one request (WCB first, then USB) and, if it handled none,
+    //     runs the background unit;
+    // then finishPass() into `wcbOut`, every pass. No unit waits more than one pass for another.
+    template <class WcbIn, class UsbIn, class Out>
+    void afterButtons(uint32_t nowMs, bool fired, bool faulted, Link<WcbIn> wcb, Link<UsbIn> usb, Out &wcbOut) {
+        if (faulted)
+            faultPass();
+        if (fired) {
+            lastWork_ = Work::Presses;
+        } else if (backgroundOwed_) {
+            background(nowMs, !faulted);
+            backgroundOwed_ = false;
+            lastWork_ = Work::Background;
+        } else if (pump(wcb.port, wcb.lines, wcb.replies) || pump(usb.port, usb.lines, usb.replies)) {
+            backgroundOwed_ = true;
+            lastWork_ = Work::Request;
+        } else {
+            background(nowMs, !faulted);
+            lastWork_ = Work::Background;
+        }
+        finishPass(wcbOut);
     }
 
   private:
@@ -193,6 +240,8 @@ class Runtime {
     uint8_t deferredCount_ = 0;
     uint8_t firesThisPass_ = 0;
     uint16_t droppedPresses_ = 0;
+    bool backgroundOwed_ = false;  // a request was handled; the next pass without a press is the background unit's
+    Work lastWork_ = Work::Background;
     bool announcing_ = false;
     uint32_t nextAnnounce_ = 0;
     uint32_t rng_ = 1;
