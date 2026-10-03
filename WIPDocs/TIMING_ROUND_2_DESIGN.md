@@ -62,7 +62,8 @@ so a request no longer delays the motors' pass at all.
 
 - **A pass where a press fired** (including a deferred press) reads no request bytes and runs no background unit.
   Bytes wait in the UART's 64-byte RX buffer (9600 baud fills about 1 byte a millisecond).
-- **A pass right after one that handled a request** runs the background unit and reads no request bytes.
+- **The first pass without a press after one that handled a request** runs the background unit and reads no
+  request bytes (a press pass in between doesn't cancel the background unit it is owed).
 - **Any other pass** pumps the ports (WCB first, then USB) until one request is handled or the bytes run out. If it
   handled a request, the pass ends there; otherwise it runs the background unit.
 
@@ -105,10 +106,14 @@ Two bugs, both in `0a8b73f`:
    dropped; the Pi resends on silence), as it does today whenever the queue is full.
 2. **One deferred slot.** `fireOrDefer` stores a single deferred press, so a second deferral (two presses in one
    pass while the EEPROM is busy, or now a full queue) overwrites the first.
-   **Fix:** a small FIFO of deferred presses, sized to the most presses one pass can fire (five by reading
-   `Runtime::buttons()`: one deferred plus two per controller; a test pins the number). Each entry keeps the
-   existing rule: dropped if its controller has gone or it is over 250 ms old. They fire in order at the start of
-   `buttons()`, stopping at the first that still can't go.
+   **Fix:** a FIFO of 8 deferred presses (48 bytes). Each entry keeps the existing rule: dropped if its controller
+   has gone or it is over 250 ms old. They fire in order at the start of `buttons()`, stopping at the first that
+   still can't go, and a new press queues behind any that wait. A press that finds the FIFO full is counted
+   (`Runtime::droppedPresses()`); nothing a person can do with two controllers fills it.
+3. **At most three presses fire in one pass.** One pass can fire one press per controller plus one on the shared
+   repeat timer, plus any that waited; releasing a queue of waiting presses could fire several at once. A press
+   past the third waits one pass in the FIFO, in order. Three presses with their PRESS lines measure 867-891 us
+   (Part A), four 990.5 us.
 
 A deferred press's PRESS event goes out when it fires, as today.
 
@@ -120,8 +125,8 @@ write takes a few more passes when many bytes already match; what is written, ve
 
 ## 6. If presses alone are over 1 ms
 
-Five presses in one pass are not measured yet; four take 990.5 us. The first task of the plan measures five. If any
-press-only pass reaches 1 ms, PRESS event lines move out of the press pass: the pass records the event (slot, key,
+With at most three presses a pass (section 4), a press-only pass measured 891 us at worst under Part A. The timing
+task measures it again with this design. If any press-only pass reaches 1 ms, PRESS event lines move out of the press pass: the pass records the event (slot, key,
 source, `from=`) and the background unit sends recorded events first, one per background pass, in order. The
 button commands themselves always go out in the pass they fire. If no press-only pass reaches 1 ms, this section
 is not built.
