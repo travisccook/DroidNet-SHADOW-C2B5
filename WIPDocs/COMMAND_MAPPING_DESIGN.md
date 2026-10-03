@@ -441,20 +441,41 @@ The library has no Arduino dependency, so it builds and tests on the host.
 ## Timing and memory
 
 - **Loop time.** Worst-case time the mapping adds to one loop pass, measured on the emulated
-  ATmega2560 at 16 MHz by the `test_avr_timing_*` suites (126 figures; Timer1, interrupts off,
-  Serial1 idle so each drain moves 64 bytes, 15-character keys and defaults). Timing Part A (the
-  speedups: CRC byte planes and AVR assembly, block EEPROM reads, faster line building and TX
-  copies, `sm::Uart1`; every byte sent unchanged, checked by `tools/shadowmap/test_transcripts.py`)
-  brought the figures at or over 1 ms from 61 to 5. The worst GET pass went from 2.06 ms to
-  0.83 ms, DEFAULTS' worst step from 10.7 ms to 0.12 ms, the battery report from 1.46 ms to
-  0.44 ms, four presses in one pass from 2.58 ms to 0.99 ms.
+  ATmega2560 at 16 MHz by the `test_avr_timing_*` suites (131 figures; Timer1, interrupts off,
+  Serial1 idle so each drain moves 64 bytes, 15-character keys and defaults). Every figure is under
+  1 ms, enforced by `test_avr_timing_*` (a figure at or over 1 ms fails the suite).
 
-  **Still over 1 ms**, all a press firing in the same pass as a request or an EEPROM write:
-  a SET in flight and a long press 1.115 ms; the worst GET, a long press and the drain 1.093 ms; a
-  press with its PRESS line mid-SET 1.073 ms; a press and a SET 1.072 ms; a press and the worst GET
-  1.014 ms. Four presses in one pass: 0.99 ms. Fixing these without changing behaviour is the
-  next timing round. The suites only report for now (`SM_TIMING_REPORT_ONLY` in `platformio.ini`);
-  remove it once every pass is under 1 ms.
+  **The pass rule** (`Runtime::afterButtons`, called from `loop()` after the motors and the buttons;
+  `WIPDocs/TIMING_ROUND_2_DESIGN.md` section 3):
+  - A pass where a press fired reads no request bytes and runs no background unit.
+  - The first pass without a press after one that handled a request runs the background unit and
+    reads no request bytes.
+  - Any other pass pumps the ports (WCB first, then USB) until one request is handled or the bytes
+    run out; if none was handled, it runs the background unit.
+
+  **Waiting presses.** A press that can't go (EEPROM mid-write, no room in the TX queue, or already
+  three fired this pass) waits in a FIFO of 8 and fires in order, at most 3 presses a pass
+  (`kMaxFiresPerPass`); one older than 250 ms or whose controller has gone is dropped. While any
+  press waits, the TX queue is held for its command (the hold).
+
+  **Worst figures:**
+
+  | us | Pass |
+  |---:|---|
+  | 944.5 | 63 RX bytes ending the worst GET, answered, + drain |
+  | 892.0 | three presses + a write's last step (the worst press-only pass) |
+  | 866.0 | three presses in one pass (one deferred) |
+  | 812.5 | four presses due in one pass (three fire, one waits a pass) |
+  | 806.5 | GET pass: F CIRCLE RIGHTL (15-char key over 15-char default) |
+
+  Before round 2 (Part A, `52df1b9`): 5 of 126 figures at or over 1 ms, worst 1.115 ms; at `0a8b73f`, 61.
+
+  - The worst whole pass is the 63-byte read that ends with the worst GET, answered, plus the drain:
+    944.5 us, 56 us under the limit. @SM v4's longer lines (`kMaxLine` 96, a 93-character SLOT) will
+    grow this pass, so the raw-commands work must re-measure it.
+  - While a WCB request can't be answered yet, the USB port isn't read. This is bench-only and bounded.
+  - A request refused for room still counts as the pass's request. A press in every other pass could
+    therefore delay requests indefinitely, but real presses come about a second apart.
 
   Boot reads the 144 double-tap and long-press records once, in `setup()`.
 
@@ -462,7 +483,7 @@ The library has no Arduino dependency, so it builds and tests on the host.
   - A lookup that would have to wait on an EEPROM write is deferred to the next pass. That
     press is dropped if its controller has gone, or if it's more than 250 ms old.
   - A request that can't be answered yet stays queued, and bytes arriving meanwhile are read
-    and dropped so Serial1's 64-byte RX buffer can't overflow.
+    and dropped so Serial1's 64-byte RX buffer can't overflow. It counts as its pass's request.
   - USB replies wait until the debug output is nearly empty, so `printOutput()` never writes
     more than about 128 bytes for them.
 - **Round trips on SHADOW's side,** from the simulator, 9600 baud: GET about 75 ms, SET about
@@ -473,17 +494,20 @@ The library has no Arduino dependency, so it builds and tests on the host.
   write), REVERT 159-175 ms, DUMP 4.41 s to `END DUMP 72`. Those were v1, before double taps; expect a
   DUMP of about 12.5 s (v3, 216 slots) and a SUM of about 0.3 s now (not yet measured on the droid).
 - **Memory:**
-  - Static SRAM is 2895 bytes, down from 3801 before the runtime mapping (the tables,
-    descriptions and switch strings are gone). Double taps added 89 of them; timing Part A saved
-    21 (the hex digit table went to flash).
-  - Flash is 56,264 of 253,952 bytes (53,126 before Part A: the CRC byte planes, the assembly,
-    the Serial1 adapter).
+  - Static SRAM is 2018 bytes (`pio run -e SHADOWC2B5`: "used 2018 bytes from 8192 bytes"), down
+    from 3801 before the runtime mapping (the tables, descriptions and switch strings are gone).
+    Double taps added 89 of them; timing Part A saved 21 (the hex digit table went to flash).
+    Part A left it at 2895. Turning `SHADOW_VERBOSE` off in round 2 saved about 930 bytes (to 1969);
+    the round's own growth is 49 bytes, inside
+    the 64-byte budget (limit 1969 + 64 = 2033).
+  - Flash is 54,404 of 253,952 bytes (56,264 after Part A, with `SHADOW_VERBOSE` on; 53,126 before
+    Part A).
 
 ## Testing
 
 ```bash
-pio test -e native                        # host: 165 tests (+33 AVR-only, skipped)
-pio test -e simavr --without-uploading    # emulated ATmega2560: 197 (+1 host-only, skipped)
+pio test -e native                        # host: 185 tests (+35 AVR-only, skipped)
+pio test -e simavr --without-uploading    # emulated ATmega2560: 219 (+1 host-only, skipped)
 python3 -m unittest tools/shadowmap/test_shadowmap.py   # reference client vs. the firmware logic
 python3 -m unittest tools/shadowmap/test_transcripts.py # what SHADOW sends, against 0a8b73f
 ```
@@ -496,7 +520,11 @@ python3 -m unittest tools/shadowmap/test_transcripts.py # what SHADOW sends, aga
   - the protocol: every verb and error, CRC handling, routing, DUMP/SUM consistency, flow control,
     button commands always fitting during a DUMP
   - runtime timing, and the real EEPROM under simavr
-  - every mapping pass's worst time (`test_avr_timing_*`, report only for now)
+  - every mapping pass's worst time (`test_avr_timing_*`; fails at 1 ms)
+  - waiting presses (`test_defer`): the FIFO, the hold, the three-a-pass limit, the 250 ms and
+    controller-gone drops, commands that wait for TX room
+  - the pass rule (`test_scheduler`): a press pass reads nothing, requests and the background unit
+    both progress, a DUMP and a stream of GETs both finish, the fault path
   - the faster code against the code it replaced (`test_equiv_*`, `test_avr_crc_asm`,
     `test_avr_uart1`), and transcripts of scripted sessions against goldens from `0a8b73f`
     (`tools/shadowmap/test_transcripts.py`)

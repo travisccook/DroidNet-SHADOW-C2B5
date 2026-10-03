@@ -1,6 +1,6 @@
 # Timing round 2: every mapping pass under 1 ms, motors first
 
-**Status:** design approved in chat on 2026-10-02; this spec awaits the owner's review.
+**Status:** implemented on branch timing/round-2 (to be merged to main and tagged `stage/timing-round-2`), 2026-10-02 / 2026-10-03; not flashed.
 **Base:** `main` at `52df1b9` (timing Part A, tagged `stage/timing-part-a`). The droid runs `0a8b73f`
 (tagged `droid/c2-body-2026-09-29`).
 **Delivers:** tag `stage/timing-round-2`. Raw commands (@SM v4) are rebased on top afterwards, under their own
@@ -91,6 +91,14 @@ for long: presses fire on transitions and timers (the shared repeat is once a se
   out one pass later.
 - READY in the first pass after a boot names that pass's controllers, not `pads=-` (`setPads` now runs before
   any request).
+- When `@SM EVENTS 1` arrives in the pass a controller connects, that controller's `@SM CTL` event is no longer
+  sent. The cause is the same as READY's `pads=`: `setPads` now runs before the request.
+- A request queued right behind one that can't be answered yet is read and dropped, under the existing rule. The
+  Pi sends one request at a time and resends on silence.
+- A second request already in the RX buffer waits one pass, so a background line (for example a DUMP line) can go
+  out before its reply.
+- Button commands, and PRESS events of presses that waited, that `0a8b73f` dropped for want of TX room are now
+  sent later, in order.
 
 ## 4. No dropped button commands
 
@@ -117,6 +125,10 @@ Two bugs, both in `0a8b73f`:
 
 A deferred press's PRESS event goes out when it fires, as today.
 
+**Decisions taken during implementation.** The hold is released at the start of `buttons()` and turned on as soon
+as a press is kept waiting or newly deferred. It covers presses waiting on the EEPROM or on the three-a-pass
+limit, not only presses waiting for room. A deferred press's PRESS event goes out when it fires.
+
 ## 5. The EEPROM writer's step
 
 `MapStore::step()` in its write phase reads bytes until it finds one to write, so a step over bytes that already
@@ -126,10 +138,12 @@ write takes a few more passes when many bytes already match; what is written, ve
 ## 6. If presses alone are over 1 ms
 
 With at most three presses a pass (section 4), a press-only pass measured 891 us at worst under Part A. The timing
-task measures it again with this design. If any press-only pass reaches 1 ms, PRESS event lines move out of the press pass: the pass records the event (slot, key,
+task measured it again with this design. If any press-only pass reaches 1 ms, PRESS event lines move out of the press pass: the pass records the event (slot, key,
 source, `from=`) and the background unit sends recorded events first, one per background pass, in order. The
 button commands themselves always go out in the pass they fire. If no press-only pass reaches 1 ms, this section
 is not built.
+
+**Outcome:** Task 6a was not needed. The worst press-only pass is 892.0 us (three presses + a write's last step).
 
 ## 7. Motor safety
 
@@ -161,7 +175,8 @@ events carry the same slot, key and source), or turn `SHADOW_VERBOSE` back on fo
 
 ## 8. Testing
 
-- Timing suites: `SM_TIMING_REPORT_ONLY` removed, so any figure at or over 1 ms fails. New figures: five presses
+- Timing suites ("five presses in one pass" is superseded by the three-a-pass limit; the four-due figure, three
+  then one, covers it): `SM_TIMING_REPORT_ONLY` removed, so any figure at or over 1 ms fails. New figures: five presses
   in one pass (with and without EVENTS), a press with each request kind arriving, two requests, the background unit
   in the pass after a request, presses while commands wait for room.
 - `test_scheduler` (new): the rule's three cases; a press pass reads nothing; alternation under sustained requests
