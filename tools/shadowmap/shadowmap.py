@@ -19,6 +19,7 @@ Command line:
     shadowmap.py --wcb /dev/ttyUSB0 --shadow-port 3 set F L1 UP scream
     shadowmap.py --wcb /dev/ttyUSB0 --shadow-port 3 set F L1 UP2 scream   (UP2 = UP tapped twice)
     shadowmap.py --wcb /dev/ttyUSB0 --shadow-port 3 set F L1 UPL quiet   (UPL = UP held for a long press)
+    shadowmap.py --wcb /dev/ttyUSB0 --shadow-port 3 set --raw F L1 UP ';W2;S4PLAY:3'   (a raw command, sent as typed)
     shadowmap.py --usb /dev/ttyACM0 get F L1 UP        (resets the Mega when it opens the port)
     shadowmap.py --wcb /dev/ttyUSB0 --shadow-port 3 battery
 
@@ -38,12 +39,13 @@ from typing import Callable, Dict, Iterable, List, Optional, Tuple
 CONTROLLERS = ("F", "D")
 MODIFIERS = ("NONE", "L1", "L2", "PS", "CIRCLE", "CROSS")
 BUTTONS = ("UP", "RIGHT", "DOWN", "LEFT", "L3", "PS")
-PROTOCOL_VERSION = 3  # v2 added the double-tap slots, v3 the long presses
+PROTOCOL_VERSION = 4  # v2 added the double-tap slots, v3 the long presses, v4 raw commands
 SINGLE_SLOTS = 72  # 0-71 single presses; 72-143 tapped twice; 144-215 held
 TAPS = (1, 2, 3)  # single, double tap, long press
 TAP_MARK = {1: "", 2: "2", 3: "L"}
 SLOT_COUNT = len(TAPS) * SINGLE_SLOTS
-KEY_RE = re.compile(r"^[A-Za-z0-9_]{1,15}$")
+KEY_RE = re.compile(r"^[A-Za-z0-9_]{1,15}\Z")  # \Z, not $: "$" also matches before a trailing "\n"
+RAW_RE = re.compile(r"[\x20-\x7e]{1,15}")  # a raw command; use with fullmatch
 FORBIDDEN = ("^",)  # the WCB splits commands on it
 
 
@@ -58,6 +60,31 @@ class ProtocolError(Exception):
 
 class Timeout(Exception):
     """No valid reply in time (after retries)."""
+
+
+def valid_raw(text) -> bool:
+    """A raw command: 1-15 printable ASCII characters, space included, sent as typed."""
+    return isinstance(text, str) and RAW_RE.fullmatch(text) is not None
+
+
+def raw_token(text: str) -> str:
+    """How a raw command travels in an @SM line: '!' and its bytes in upper-case hex."""
+    return "!" + text.encode("ascii").hex().upper()
+
+
+def parse_value(token: str) -> Tuple[str, bool]:
+    """A slot's command token -> (text, raw): '-' is unmapped, '!<hex>' a raw command, else a key."""
+    if token == "-":
+        return "", False
+    if token.startswith("!"):
+        try:
+            text = bytes.fromhex(token[1:]).decode("ascii")
+        except ValueError:  # odd length, a bad digit, or a byte over 0x7F
+            raise ProtocolError("parse", token) from None
+        if not valid_raw(text):
+            raise ProtocolError("parse", token)
+        return text, True
+    return token, False
 
 
 # ---------------------------------------------------------------------------------------
@@ -145,15 +172,23 @@ def all_slots() -> List[Slot]:
 @dataclass
 class SlotState:
     slot: Slot
-    key: str  # "" = unmapped
+    key: str  # "" = unmapped; with raw, a raw command's text
     source: str  # eeprom | default | reserved
     default: Optional[str] = None  # built-in key ("" = none); None for reserved slots
     reserved: Optional[str] = None  # psgate | overspeed | stick
+    raw: bool = False  # key is a raw command (v4): SHADOW sends it to the WCB as typed
+
+    @property
+    def token(self) -> str:
+        """The command as SHADOW writes it: a key, '-' (unmapped) or '!<hex>' (raw)."""
+        if self.raw and self.key:
+            return raw_token(self.key)
+        return self.key or "-"
 
     @property
     def body(self) -> str:
         """The SLOT line's text after '@SM SLOT ', exactly as SHADOW sends it."""
-        text = f"{self.slot} {self.key or '-'} {self.source}"
+        text = f"{self.slot} {self.token} {self.source}"
         if self.reserved is not None:
             return f"{text} res={self.reserved}"
         return f"{text} def={self.default or '-'}"
@@ -183,11 +218,11 @@ def parse_slot_state(body: str) -> SlotState:
     if len(t) < 7 or t[:2] != ["@SM", "SLOT"]:
         raise ProtocolError("parse", body)
     kv = _kv(t[7:])
-    key = "" if t[5] == "-" else t[5]
+    key, raw = parse_value(t[5])
     default = None
     if "def" in kv:
         default = "" if kv["def"] == "-" else kv["def"]
-    return SlotState(Slot.from_tokens(t[2], t[3], t[4]), key, t[6], default, kv.get("res"))
+    return SlotState(Slot.from_tokens(t[2], t[3], t[4]), key, t[6], default, kv.get("res"), raw)
 
 
 @dataclass
@@ -254,14 +289,15 @@ class Event:
     controller: Optional[str] = None
     connected: Optional[bool] = None
     battery: Optional[Battery] = None
+    raw: bool = False  # PRESS: key is a raw command
 
 
 def parse_event(body: str) -> Optional[Event]:
     t = body.split(" ")
     if len(t) >= 7 and t[1] == "PRESS":
         kv = _kv(t[7:])
-        return Event("PRESS", Slot.from_tokens(t[2], t[3], t[4]), "" if t[5] == "-" else t[5], t[6], kv.get("from"),
-                     kv.get("res"))
+        key, raw = parse_value(t[5])
+        return Event("PRESS", Slot.from_tokens(t[2], t[3], t[4]), key, t[6], kv.get("from"), kv.get("res"), raw=raw)
     if len(t) == 4 and t[1] == "CTL":
         return Event("CTL", controller=t[2], connected=t[3] == "1")
     battery = parse_battery(body)
@@ -429,12 +465,17 @@ class Client:
         want = f"@SM SLOT {slot} "
         return parse_slot_state(self.request(f"@SM GET {slot}", lambda r: r.startswith(want))[0])
 
-    def set(self, slot: Slot, key: str) -> None:
-        """Maps `slot` to stored command `key` ("" to unmap). Returns once SHADOW has written
-        and verified it."""
-        if key and not KEY_RE.match(key):
-            raise ValueError(f"key must be 1-15 of [A-Za-z0-9_]: {key!r}")
-        token = key or "-"
+    def set(self, slot: Slot, key: str, raw: bool = False) -> None:
+        """Maps `slot` to stored command `key` ("" to unmap), or with `raw` to a raw command that
+        SHADOW sends exactly as typed. Returns once SHADOW has written and verified it."""
+        if raw:
+            if not valid_raw(key):
+                raise ValueError(f"a raw command is 1-15 printable ASCII characters: {key!r}")
+            token = raw_token(key)
+        else:
+            if key and not KEY_RE.match(key):
+                raise ValueError(f"key must be 1-15 of [A-Za-z0-9_]: {key!r}")
+            token = key or "-"
         want = f"@SM OK SET {slot} {token}"
         self.request(f"@SM SET {slot} {token}", lambda r: r == want)
 
@@ -545,6 +586,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--pi-wcb", type=int, help="the Pi's WCB number (with --shadow-wcb)")
     ap.add_argument("command", choices=["hello", "get", "set", "revert", "dump", "sum", "defaults", "cfg", "battery", "watch"])
     ap.add_argument("args", nargs="*")
+    ap.add_argument("--raw", action="store_true", help="set: the value is a raw command, sent exactly as typed")
     a = ap.parse_args(argv)
 
     if a.wcb:
@@ -560,7 +602,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     elif a.command == "get":
         print(client.get(Slot.parse(" ".join(a.args))).body)
     elif a.command == "set":
-        client.set(Slot.parse(" ".join(a.args[:3])), a.args[3] if len(a.args) > 3 else "")
+        client.set(Slot.parse(" ".join(a.args[:3])), a.args[3] if len(a.args) > 3 else "", raw=a.raw)
         print("ok")
     elif a.command == "revert":
         client.revert(Slot.parse(" ".join(a.args)))

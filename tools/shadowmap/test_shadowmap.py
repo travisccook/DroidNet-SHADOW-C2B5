@@ -59,6 +59,7 @@ class WcbEmulator(smc.Transport):
         self.corrupt_next_request = False
         self.drop_next_reply = False
         self.corrupt_next_reply = False
+        self.raw_ok = False  # raw commands go out as typed: bare, '^' and ';T' included
 
     # -- simulator plumbing ------------------------------------------------------------
 
@@ -75,6 +76,9 @@ class WcbEmulator(smc.Transport):
             self._from_shadow(out)
 
     def _from_shadow(self, line: str) -> None:
+        if self.raw_ok and not line.startswith("@WDP") and not re.match(r"^(;W\d{1,2},?)?;S0", line):
+            self.commands.append(line)  # a raw command, sent as typed: the WCB rules don't apply to it
+            return
         if "^" in line:
             self.violations.append(f"'^' from SHADOW: {line}")
         if line.startswith("@WDP"):
@@ -186,7 +190,7 @@ class ContractTest(unittest.TestCase):
         return smc.Slot.parse(text)
 
     def test_hello(self):
-        self.assertEqual(3, self.ready.version)
+        self.assertEqual(4, self.ready.version)
         self.assertEqual(216, self.ready.slots)
         self.assertFalse(self.ready.formatted)
         self.assertEqual("sim", self.ready.fw)
@@ -385,6 +389,65 @@ class ContractTest(unittest.TestCase):
         self.wcb.tick(6000)  # the first 0.5-3 s after boot, the next 25-30 s after that
         self.assertEqual(['@WDP1 {"type":"Shadow","fw":"sim"}'], self.wcb.announces)
 
+    RAW = ";W2;S4PLAY:3^;T"
+
+    def test_raw_command_round_trip_press_and_sum(self):
+        self.wcb.raw_ok = True
+        self.client.set(self.slot("F NONE LEFT"), self.RAW, raw=True)
+        s = self.client.get(self.slot("F NONE LEFT"))
+        self.assertEqual((self.RAW, True, "eeprom"), (s.key, s.raw, s.source))
+        self.wcb.press(foot=LEFT)
+        self.assertEqual(self.RAW, self.wcb.commands[-1])  # as typed: no prefix, no suffix
+        dump = self.client.dump()
+        self.assertTrue({x.slot: x for x in dump}[self.slot("F NONE LEFT")].raw)
+        self.assertEqual(smc.map_sum(dump), self.client.sum())  # SUM covers the !<hex> bodies
+        self.client.set(self.slot("F NONE LEFT"), "*", raw=True)  # the text "*", not a revert
+        s = self.client.get(self.slot("F NONE LEFT"))
+        self.assertEqual(("*", True, "eeprom"), (s.key, s.raw, s.source))
+
+    def test_raw_lower_case_and_bad_hex(self):
+        self.assertEqual(
+            ["@SM OK SET F NONE LEFT !3B5732"],
+            self.client.request("@SM SET F NONE LEFT !3b5732", lambda r: r.startswith("@SM OK SET")),
+        )
+        for bad in ("!", "!-", "!3", "!00", "!1F", "!" + "41" * 16):
+            with self.assertRaises(smc.ProtocolError) as e:
+                self.client.request(f"@SM SET F NONE LEFT {bad}", lambda r: False)
+            self.assertEqual("key", e.exception.code)
+        with self.assertRaises(ValueError):
+            self.client.set(self.slot("F NONE LEFT"), "ab\n", raw=True)
+        with self.assertRaises(ValueError):
+            self.client.set(self.slot("F NONE LEFT"), "", raw=True)
+
+    def test_raw_event(self):
+        self.wcb.raw_ok = True
+        self.client.set(self.slot("F NONE LEFT"), "?SEQ,LIST", raw=True)
+        events = []
+        self.client.on_event = events.append
+        self.client.events(True)
+        self.wcb.press(foot=LEFT)
+        self.client.listen(0.01)
+        press = [e for e in events if e.kind == "PRESS"]
+        self.assertEqual([("?SEQ,LIST", True)], [(e.key, e.raw) for e in press])
+
+    def test_power_cut_mid_raw_write(self):
+        self.client.set(self.slot("F NONE LEFT"), "firstvalue")
+        for cut in range(0, 20):
+            self.wcb.cut_after(cut)
+            try:
+                self.client.set(self.slot("F NONE LEFT"), self.RAW, raw=True)
+            except (smc.ProtocolError, smc.Timeout):
+                pass  # verify failed after the cut: expected
+            self.wcb.reboot()
+            self.client.hello()
+            s = self.client.get(self.slot("F NONE LEFT"))
+            self.assertIn(
+                (s.key, s.raw, s.source),
+                [("firstvalue", False, "eeprom"), (self.RAW, True, "eeprom"), ("scaredsound", False, "default")],
+            )
+            self.assertEqual(smc.map_sum(self.client.dump()), self.client.sum())
+            self.client.set(self.slot("F NONE LEFT"), "firstvalue")
+
 
 class RemoteRouteTest(unittest.TestCase):
     """SHADOW on WCB 2 S-port 5, the Pi on WCB 4: every line crosses the ESP-NOW mesh."""
@@ -457,6 +520,21 @@ class FramingTest(unittest.TestCase):
             smc.Slot.parse("F L1 UP3")
         with self.assertRaises(ValueError):
             smc.Slot.parse("F L1 CROSS2")
+
+    def test_raw_tokens(self):
+        self.assertEqual("!3B57323B5334504C41593A33", smc.raw_token(";W2;S4PLAY:3"))
+        self.assertEqual((";W2", True), smc.parse_value("!3b5732"))
+        self.assertEqual(("", False), smc.parse_value("-"))
+        self.assertEqual(("scream", False), smc.parse_value("scream"))
+        for bad in ("!", "!-", "!3", "!0A", "!C3A9"):
+            with self.assertRaises(smc.ProtocolError):
+                smc.parse_value(bad)
+        self.assertTrue(smc.valid_raw(" ") and smc.valid_raw("~" * 15))
+        self.assertFalse(smc.valid_raw("ab\n") or smc.valid_raw("") or smc.valid_raw("x" * 16))
+        self.assertFalse(smc.KEY_RE.match("scream\n"))  # "$" would let the newline through
+        s = smc.parse_slot_state("@SM SLOT F NONE UP !2A eeprom def=happysound")
+        self.assertEqual(("*", True), (s.key, s.raw))
+        self.assertEqual("F NONE UP !2A eeprom def=happysound", s.body)
 
 
 if __name__ == "__main__":

@@ -3,7 +3,8 @@
 // them, with EEPROM kept in a file.
 //
 // stdin carries what SHADOW's Serial1 would receive from the WCB; stdout carries what SHADOW
-// would write to Serial1. Lines starting with "!!" are simulator controls, not serial data:
+// would write to Serial1. A raw command comes out exactly as typed (it may be a bare line, or
+// hold '^' or ";T"). Lines starting with "!!" are simulator controls, not serial data:
 //
 //   !!PRESS <foot-mask> <dome-mask> [<foot-connected> <dome-connected>]
 //                         hold these buttons (HeldBit masks, hex) for one press, let a
