@@ -82,18 +82,23 @@ bool headerValid(const uint8_t *hdr) {
            isValidSuffix(reinterpret_cast<const char *>(hdr + kHdrSuffix));
 }
 
-// A record holds a key (0-15 key characters, then only NULs, at least one) and its CRC. The
-// checks run cheapest first: the first byte (a record the name check would refuse there, such
-// as an erased one), the CRC, then the whole name. The result is the same as checking all
-// three: fieldTerminated() && isValidKey() && the CRC.
+inline bool isRawChar(uint8_t c) { return c >= 0x20 && c <= 0x7E; }
+
+// A record holds a key (0-15 key characters, then only NULs, at least one) or a raw command (its
+// first byte with kRawFlag set, 1-15 printable characters in all, then only NULs), and its CRC.
+// The checks run cheapest first: the first byte (a record the name check would refuse there,
+// such as an erased one), the CRC, then the whole name. The result is the same as checking all
+// of fieldTerminated() && (isValidKey() || the raw rule) && the CRC.
 bool slotRecordValid(const uint8_t *rec, uint8_t slot, uint16_t gen) {
-    if (rec[0] != 0 && !isKeyChar(static_cast<char>(rec[0])))
+    const uint8_t first = rec[0];
+    const bool raw = (first & kRawFlag) != 0;
+    if (raw ? !isRawChar(static_cast<uint8_t>(first & 0x7F)) : (first != 0 && !isKeyChar(static_cast<char>(first))))
         return false;
     if (get16(rec + kKeyBuf) != slotCrc(slot, gen, rec))
         return false;
-    uint8_t i = 0;
+    uint8_t i = raw ? 1 : 0;
     for (; i < kKeyBuf && rec[i] != 0; ++i) {
-        if (!isKeyChar(static_cast<char>(rec[i])))
+        if (raw ? !isRawChar(rec[i]) : !isKeyChar(static_cast<char>(rec[i])))
             return false;
     }
     if (i == kKeyBuf)
@@ -105,6 +110,14 @@ bool slotRecordValid(const uint8_t *rec, uint8_t slot, uint16_t gen) {
     return true;
 }
 
+// A record's (or a job's) name field as text, with the raw flag cleared and reported.
+void readName(const uint8_t *name, char out[kKeyBuf], bool *raw) {
+    memcpy(out, name, kKeyBuf);
+    out[kKeyMax] = '\0';
+    *raw = (name[0] & kRawFlag) != 0;
+    out[0] = static_cast<char>(name[0] & 0x7F);
+}
+
 }  // namespace
 
 bool isValidKey(const char *key) {
@@ -114,6 +127,15 @@ bool isValidKey(const char *key) {
             return false;
     }
     return true;
+}
+
+bool isValidRaw(const char *text) {
+    size_t n = 0;
+    for (; text[n] != '\0'; ++n) {
+        if (n >= kKeyMax || !isRawChar(static_cast<uint8_t>(text[n])))
+            return false;
+    }
+    return n > 0;
 }
 
 bool isValidPrefix(const char *prefix) {
@@ -276,19 +298,21 @@ bool MapStore::readSlotRecord(uint8_t slot, uint8_t rec[kSlotSize]) {
     return true;
 }
 
-bool MapStore::keyForSlot(uint8_t slot, char out[kKeyBuf], Source *src) {
+bool MapStore::keyForSlot(uint8_t slot, char out[kKeyBuf], Source *src, bool *raw) {
     Source source = Source::Default;
+    bool isRaw = false;
     if (slot >= kSlotCount || slotReserved(slot) != Reserved::No) {
         out[0] = '\0';
         source = Source::Reserved;
     } else if (phase_ != Phase::Idle && kind_ == JobKind::Slot && jobIndex_ == slot) {
         // Mid-write: answer with the value being written, never a half-written one.
-        memcpy(out, jobData_, kKeyBuf);
+        readName(jobData_, out, &isRaw);
         source = Source::Eeprom;
     } else if (phase_ != Phase::Idle && kind_ == JobKind::SlotErase && jobIndex_ == slot) {
         defaultKey(slot, out);
     } else if (pendingSlot_ == slot) {
         memcpy(out, pendingKey_, kKeyBuf);
+        isRaw = pendingRaw_;
         source = Source::Eeprom;
     } else if (!formatted()) {
         defaultKey(slot, out);
@@ -297,7 +321,7 @@ bool MapStore::keyForSlot(uint8_t slot, char out[kKeyBuf], Source *src) {
         if (!readSlotRecord(slot, rec))
             return false;
         if (slotRecordValid(rec, slot, gen_)) {
-            memcpy(out, rec, kKeyBuf);
+            readName(rec, out, &isRaw);
             source = Source::Eeprom;
         } else {
             defaultKey(slot, out);
@@ -305,25 +329,28 @@ bool MapStore::keyForSlot(uint8_t slot, char out[kKeyBuf], Source *src) {
     }
     if (src != nullptr)
         *src = source;
+    if (raw != nullptr)
+        *raw = isRaw;
     return true;
 }
 
-MapStore::Result MapStore::beginSet(uint8_t slot, const char *key) {
+MapStore::Result MapStore::beginSet(uint8_t slot, const char *key, bool raw) {
     if (busy())
         return Result::Busy;
     if (slot >= kSlotCount)
         return Result::BadSlot;
     if (slotReserved(slot) != Reserved::No)
         return Result::Reserved;
-    if (!isValidKey(key))
+    if (raw ? !isValidRaw(key) : !isValidKey(key))
         return Result::BadKey;
     completion_ = Completion::None;
     if (!formatted()) {
         pendingSlot_ = slot;
         strcpy(pendingKey_, key);
+        pendingRaw_ = raw;
         startHeaderJob(0, 1, gen_, prefix_, suffix_);
     } else {
-        startSlotJob(slot, key);
+        startSlotJob(slot, key, raw);
     }
     return Result::Ok;
 }
@@ -400,9 +427,11 @@ void MapStore::startHeaderJob(uint8_t index, uint16_t seq, uint16_t gen, const c
     phase_ = Phase::Write;
 }
 
-void MapStore::startSlotJob(uint8_t slot, const char *key) {
+void MapStore::startSlotJob(uint8_t slot, const char *key, bool raw) {
     memset(jobData_, 0, sizeof(jobData_));
     copyField(jobData_, key, kKeyBuf);
+    if (raw)
+        jobData_[0] = static_cast<uint8_t>(jobData_[0] | kRawFlag);  // the CRC below covers the flag
     put16(jobData_ + kKeyBuf, slotCrc(slot, gen_, jobData_));
 
     kind_ = JobKind::Slot;
@@ -476,7 +505,7 @@ void MapStore::finishJob(bool ok) {
         if (pendingSlot_ != kNoSlot) {
             const uint8_t slot = pendingSlot_;
             pendingSlot_ = kNoSlot;
-            startSlotJob(slot, pendingKey_);
+            startSlotJob(slot, pendingKey_, pendingRaw_);
             return;
         }
         completion_ = Completion::Done;

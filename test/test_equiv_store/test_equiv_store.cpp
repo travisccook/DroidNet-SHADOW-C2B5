@@ -1,5 +1,5 @@
-// The store's faster paths against the rules they replaced (copied here from 0a8b73f): which slot
-// records count as valid, the double-tap and long-press bits loaded from a defaults table,
+// The store's faster paths against the rules they replaced (copied here from 0a8b73f, and the raw
+// rule as the raw-commands plan writes it): which slot records count as valid, the double-tap and long-press bits loaded from a defaults table,
 // defaultKey, the default readBlock, and a write that fails its verify.
 #include <unity.h>
 
@@ -61,10 +61,31 @@ uint16_t slotCrc(uint8_t slot, uint16_t gen, const uint8_t *name) {
     return crc;
 }
 
+// The raw rule as the raw-commands plan (Task 1) writes it.
+bool isValidRaw(const char *text) {
+    size_t n = 0;
+    for (; text[n] != '\0'; ++n) {
+        const uint8_t c = static_cast<uint8_t>(text[n]);
+        if (n >= kKeyMax || c < 0x20 || c > 0x7E)
+            return false;
+    }
+    return n > 0;
+}
+
+bool rawRecordValid(const uint8_t *rec) {
+    if ((rec[0] & kRawFlag) == 0)
+        return false;
+    char text[kKeyBuf];
+    memcpy(text, rec, kKeyBuf);
+    text[0] = static_cast<char>(rec[0] & 0x7F);
+    text[kKeyMax] = '\0';
+    return isValidRaw(text);
+}
+
 bool slotRecordValid(const uint8_t *rec, uint8_t slot, uint16_t gen) {
     if (!fieldTerminated(rec, kKeyBuf))
         return false;
-    if (!isValidKey(reinterpret_cast<const char *>(rec)))
+    if (!isValidKey(reinterpret_cast<const char *>(rec)) && !rawRecordValid(rec))
         return false;
     return static_cast<uint16_t>(rec[kKeyBuf] | (rec[kKeyBuf + 1] << 8)) == slotCrc(slot, gen, rec);
 }
@@ -199,8 +220,17 @@ static void test_record_validity_matches_the_old_rule() {
                 for (uint8_t i = 0; i < kKeyBuf; ++i)
                     name[i] = static_cast<uint8_t>(rnd());
                 break;
-            case 6:  // erased
-                memset(name, 0xFF, sizeof(name));
+            case 6:  // erased, or a raw command (the flag on the first byte), now and then with an odd byte
+                if (r & 8) {
+                    memset(name, 0, sizeof(name));
+                    for (uint8_t i = 0; i < len; ++i)
+                        name[i] = static_cast<uint8_t>(0x20 + rnd() % 95);
+                    name[0] = static_cast<uint8_t>(name[0] | kRawFlag);
+                    if (rnd() & 1)
+                        name[rnd() % kKeyBuf] = kOdd[rnd() % sizeof(kOdd)];
+                } else {
+                    memset(name, 0xFF, sizeof(name));
+                }
                 break;
             default:  // 16 key characters, no NUL
                 for (uint8_t i = 0; i < kKeyBuf; ++i)
@@ -211,16 +241,21 @@ static void test_record_validity_matches_the_old_rule() {
         checkRecord(store, slot, rec);
         ++cases;
     }
-    // Every key length with every odd byte at every position, CRC right.
-    for (uint8_t len = 0; len <= kKeyMax; ++len) {
-        for (uint8_t at = 0; at < kKeyBuf; ++at) {
-            for (uint8_t k = 0; k < sizeof(kOdd); ++k) {
-                memset(name, 0, sizeof(name));
-                memset(name, 'q', len);
-                name[at] = kOdd[k];
-                writeRecord(kSlotFootNoneDown, name, false, rec);
-                checkRecord(store, kSlotFootNoneDown, rec);
-                ++cases;
+    // Every key length, and every raw command length (flag on the first byte), with every odd byte
+    // at every position, CRC right.
+    for (uint8_t asRaw = 0; asRaw < 2; ++asRaw) {
+        for (uint8_t len = 0; len <= kKeyMax + 1; ++len) {
+            for (uint8_t at = 0; at < kKeyBuf; ++at) {
+                for (uint8_t k = 0; k < sizeof(kOdd); ++k) {
+                    memset(name, 0, sizeof(name));
+                    memset(name, asRaw ? '~' : 'q', len < kKeyBuf ? len : kKeyBuf);
+                    name[at] = kOdd[k];
+                    if (asRaw)
+                        name[0] = static_cast<uint8_t>(name[0] | kRawFlag);
+                    writeRecord(kSlotFootNoneDown, name, false, rec);
+                    checkRecord(store, kSlotFootNoneDown, rec);
+                    ++cases;
+                }
             }
         }
     }

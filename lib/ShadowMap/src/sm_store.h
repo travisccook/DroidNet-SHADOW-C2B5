@@ -3,8 +3,9 @@
 // Layout, from `base` (3952 bytes in all):
 //   header A (32 B), header B (32 B)   magic "SM", layout version, slot count, sequence,
 //                                      generation, command prefix/suffix, CRC16
-//   216 slots x 18 B                   stored-command key (NUL-padded) + CRC16 over
-//                                      (layout version, generation, slot index, key)
+//   216 slots x 18 B                   stored-command key (NUL-padded), or a raw command with
+//                                      bit 7 of its first byte set, + CRC16 over (layout
+//                                      version, generation, slot index, the 16 name bytes)
 //
 // The 72 double-tap slots (72-143) follow the 72 single-press slots, which end at 1360, and
 // the 72 long-press slots (144-215) follow the double taps, from 2656. The header's slot count
@@ -36,6 +37,11 @@ constexpr uint8_t kKeyBuf = kKeyMax + 1;
 constexpr uint8_t kPrefixMax = 11;
 constexpr uint8_t kSuffixMax = 7;
 
+// A raw command's record is its text with this bit set on the first byte. Printable text never
+// sets bit 7, so the flag costs no characters, and firmware from before raw commands (@SM v3 and
+// older) fails isValidKey() on the record and reads the slot's built-in default instead.
+constexpr uint8_t kRawFlag = 0x80;
+
 // One built-in mapping. Arrays of these live in flash (PROGMEM).
 struct DefaultMapping {
     uint8_t slot;
@@ -46,6 +52,10 @@ enum class Source : uint8_t { Eeprom, Default, Reserved };
 
 // "" (unmapped) or 1-15 of [A-Za-z0-9_].
 bool isValidKey(const char *key);
+// 1-15 printable ASCII characters (0x20-0x7E), space included: a raw command, which SHADOW sends
+// to the WCB exactly as typed, with no prefix or suffix. '^' and ";T" are allowed: they do on
+// the WCB what they always do.
+bool isValidRaw(const char *text);
 // 1-11 printable characters, starting with ';' so a command is never a bare (broadcast)
 // line, with no '^' (the WCB's delimiter) and no ";T"/";t" (a WCB timer command), and not
 // ending with ';' (";" + a key starting with t would make one).
@@ -77,10 +87,11 @@ class MapStore {
     const char *prefix() const { return prefix_; }
     const char *suffix() const { return suffix_; }
 
-    // The key a slot currently maps to ("" = nothing). Returns false, without touching `out`,
-    // only while an EEPROM write is in flight and the slot has to be read from EEPROM; call
-    // again on a later loop pass. The writer pauses for one pass to let the read through.
-    bool keyForSlot(uint8_t slot, char out[kKeyBuf], Source *src = nullptr);
+    // The key a slot currently maps to ("" = nothing), or with `*raw` true the raw command's
+    // text; the raw flag itself never reaches `out`. Returns false, without touching `out`,
+    // `*src` or `*raw`, only while an EEPROM write is in flight and the slot has to be read from
+    // EEPROM; call again on a later loop pass. The writer pauses for one pass to let the read through.
+    bool keyForSlot(uint8_t slot, char out[kKeyBuf], Source *src = nullptr, bool *raw = nullptr);
     void defaultKey(uint8_t slot, char out[kKeyBuf]) const;
 
     // Whether the double tap of `slot` (either its single-press or its double-tap index) maps
@@ -92,7 +103,7 @@ class MapStore {
     bool longPressMapped(uint8_t slot) const;
 
     // Start a write. Only one runs at a time; watch takeCompletion() for the outcome.
-    Result beginSet(uint8_t slot, const char *key);  // "" clears the slot
+    Result beginSet(uint8_t slot, const char *key, bool raw = false);  // "" clears the slot; raw: a raw command
     Result beginRevert(uint8_t slot);                // back to the built-in default
     Result beginDefaults();
     Result beginPrefix(const char *prefix);
@@ -123,7 +134,7 @@ class MapStore {
     }
 
     void startHeaderJob(uint8_t index, uint16_t seq, uint16_t gen, const char *prefix, const char *suffix);
-    void startSlotJob(uint8_t slot, const char *key);
+    void startSlotJob(uint8_t slot, const char *key, bool raw);
     void startEraseJob(uint8_t slot);
     void finishJob(bool ok);
     void applyHeader(const uint8_t *hdr, uint8_t index);
@@ -157,6 +168,7 @@ class MapStore {
 
     uint8_t pendingSlot_ = kNoSlot;  // slot write queued behind a first-time format
     char pendingKey_[kKeyBuf];
+    bool pendingRaw_ = false;  // the queued write is a raw command
 
     bool readWanted_ = false;
     Completion completion_ = Completion::None;
