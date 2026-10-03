@@ -20,7 +20,8 @@
 //
 // All writes happen in step(), one byte per call and only when the EEPROM is idle, so the
 // main loop never waits on EEPROM. Bytes that already hold the right value are skipped and
-// every record is read back and verified once written.
+// every record is read back and verified once written. At most kMaxReadsPerStep bytes are read
+// per call.
 #pragma once
 
 #include <stdint.h>
@@ -58,6 +59,9 @@ class MapStore {
     static constexpr uint8_t kHeaderSize = 32;
     static constexpr uint8_t kSlotSize = kKeyBuf + 2;
     static constexpr uint16_t kFootprint = 2 * kHeaderSize + static_cast<uint16_t>(kSlotCount) * kSlotSize;
+    // Bytes the write phase reads in one step() before it returns: a step over bytes that already
+    // hold the right value stays short (about 5 us a byte on the Mega), and the next step carries on.
+    static constexpr uint8_t kMaxReadsPerStep = 4;
 
     enum class Result : uint8_t { Ok, Busy, BadSlot, Reserved, BadKey, BadArg };
     enum class Completion : uint8_t { None, Done, Failed };

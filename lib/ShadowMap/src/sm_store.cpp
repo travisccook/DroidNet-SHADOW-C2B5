@@ -434,7 +434,9 @@ void MapStore::step() {
     }
 
     if (phase_ == Phase::Write) {
-        while (jobPos_ < jobLen_) {
+        for (uint8_t reads = 0; jobPos_ < jobLen_; ++reads) {
+            if (reads == kMaxReadsPerStep)
+                return;  // the next step carries on
             const uint16_t addr = static_cast<uint16_t>(jobAddr_ + jobPos_);
             const uint8_t want = jobData_[jobPos_++];
             if (io_.read(addr) != want) {

@@ -519,6 +519,35 @@ static void test_double_tap_defaults_and_failed_writes() {
     TEST_ASSERT_EQUAL_STRING("scantwice", key);
 }
 
+// A rewrite of the same key: every byte already matches, so the write phase only reads. Each step
+// reads at most kMaxReadsPerStep bytes (the verify step reads the record in one block), and the
+// result is the same as before: no writes, verified, Done.
+static void test_a_step_reads_at_most_four_bytes() {
+    MapStore store(*eeprom, kTestDefaults, kTestDefaultCount);
+    store.begin();
+    set(store, kSlotFootL1Up, "samekey");
+    const uint32_t writesBefore = eeprom->writes;
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MapStore::Result::Ok),
+                            static_cast<uint8_t>(store.beginSet(kSlotFootL1Up, "samekey")));
+    uint8_t shortSteps = 0;
+    while (store.busy()) {
+        const uint32_t before = eeprom->reads;
+        store.step();
+        const uint32_t n = eeprom->reads - before;
+        if (n != MapStore::kSlotSize) {  // the verify step reads the whole record
+            TEST_ASSERT_LESS_OR_EQUAL_UINT32(MapStore::kMaxReadsPerStep, n);
+            ++shortSteps;
+        }
+        eeprom->tick();
+    }
+    TEST_ASSERT_EQUAL_UINT8((MapStore::kSlotSize + MapStore::kMaxReadsPerStep - 1) / MapStore::kMaxReadsPerStep,
+                            shortSteps);
+    TEST_ASSERT_EQUAL_UINT32(writesBefore, eeprom->writes);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(MapStore::Completion::Done),
+                            static_cast<uint8_t>(store.takeCompletion()));
+    expectKey(store, kSlotFootL1Up, "samekey", Source::Eeprom);
+}
+
 // Long presses: the third bank, after the double taps, with their own RAM copy.
 static void test_long_presses_follow_the_double_taps() {
     const uint8_t lng = slotIndex(Ctrl::F, Mod::L1, Btn::UP, Tap::LONG);
@@ -604,6 +633,7 @@ int runAllTests() {
     RUN_TEST(test_valid_eeprom_slot_count);
     RUN_TEST(test_revert_erases_one_slot);
     RUN_TEST(test_power_cut_during_revert);
+    RUN_TEST(test_a_step_reads_at_most_four_bytes);
     RUN_TEST(test_double_taps_follow_the_single_slots);
     RUN_TEST(test_double_tap_defaults_and_failed_writes);
     RUN_TEST(test_long_presses_follow_the_double_taps);
