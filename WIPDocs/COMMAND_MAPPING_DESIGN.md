@@ -441,7 +441,7 @@ The library has no Arduino dependency, so it builds and tests on the host.
 ## Timing and memory
 
 - **Loop time.** Worst-case time the mapping adds to one loop pass, measured on the emulated
-  ATmega2560 at 16 MHz by the `test_avr_timing_*` suites (131 figures; Timer1, interrupts off,
+  ATmega2560 at 16 MHz by the `test_avr_timing_*` suites (132 figures; Timer1, interrupts off,
   Serial1 idle so each drain moves 64 bytes, 15-character keys and defaults). Every figure is under
   1 ms, enforced by `test_avr_timing_*` (a figure at or over 1 ms fails the suite).
 
@@ -451,7 +451,8 @@ The library has no Arduino dependency, so it builds and tests on the host.
   - The first pass without a press after one that handled a request runs the background unit and
     reads no request bytes.
   - Any other pass pumps the ports (WCB first, then USB) until one request is handled or the bytes
-    run out; if none was handled, it runs the background unit.
+    run out; if none was handled, it runs the background unit. Both ports share one 64-byte read
+    budget a pass (USB gets what the WCB left).
 
   **Waiting presses.** A press that can't go (EEPROM mid-write, no room in the TX queue, or already
   three fired this pass) waits in a FIFO of 8 and fires in order, at most 3 presses a pass
@@ -467,6 +468,7 @@ The library has no Arduino dependency, so it builds and tests on the host.
   | 866.0 | three presses in one pass (one deferred) |
   | 812.5 | four presses due in one pass (three fire, one waits a pass) |
   | 806.5 | GET pass: F CIRCLE RIGHTL (15-char key over 15-char default) |
+  | 784.0 | 63 junk bytes on each port (one shared 64-byte budget) + background unit (DUMP line, battery, announce) + drain |
 
   Before round 2 (Part A, `52df1b9`): 5 of 126 figures at or over 1 ms, worst 1.115 ms; at `0a8b73f`, 61.
 

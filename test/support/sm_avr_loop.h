@@ -133,7 +133,13 @@ uint16_t loopPass(uint32_t now, const PadState &foot, const PadState &dome, uint
     SerialPoke::dropTx1();
     io.tick();
     gFinishing = store.finishDue();
-    gLast.buttons = ticksOf([&] { gAny = runtime.buttons(now, foot, dome, &gFired); });
+    // Faulted (`mayAnnounce` false): buttons() isn't called, as in main.cpp's fault path.
+    if (mayAnnounce) {
+        gLast.buttons = ticksOf([&] { gAny = runtime.buttons(now, foot, dome, &gFired); });
+    } else {
+        gAny = false;
+        gLast.buttons = 0;
+    }
     gLast.batteries = ticksOf([&] { runtime.batteries(now, foot.connected, footBatt, dome.connected, domeBatt); });
     gLast.after = ticksOf([&] {
         runtime.afterButtons(now, gAny, !mayAnnounce, Runtime::Link<Uart1>{SMT_WCB_UART, wcbLines, port},

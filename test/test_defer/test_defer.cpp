@@ -296,10 +296,11 @@ static void test_a_deferred_press_sends_its_event() {
         pass(t += 2, kNone, kNone);
     drainOut(t);
     TEST_ASSERT_EQUAL_UINT32(1, rig->wcb.commands.count);
+    TEST_ASSERT_EQUAL_STRING(";W1;Cfup", rig->wcb.commands.last());
     bool found = false;
     for (uint8_t i = 0; i < rig->wcb.usb.count; ++i) {
         const char *l = rig->wcb.usb.last(static_cast<uint8_t>(rig->wcb.usb.count - 1 - i));
-        if (stripCrc(l, line, sizeof(line)) && strncmp(line, "@SM PRESS", 9) == 0 && strstr(line, "fup") != nullptr)
+        if (stripCrc(l, line, sizeof(line)) && strncmp(line, "@SM PRESS", 9) == 0 && strstr(line, " fup ") != nullptr)
             found = true;
     }
     TEST_ASSERT_TRUE_MESSAGE(found, "no PRESS event for the deferred press");

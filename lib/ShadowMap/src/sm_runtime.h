@@ -100,14 +100,14 @@ class Runtime {
     enum class Work : uint8_t { Presses, Request, Background };
     Work lastWork() const { return lastWork_; }
 
-    // Reads @SM requests from `port` without blocking, at most kMaxBytesPerPass bytes, and handles at
+    // Reads @SM requests from `port` without blocking, at most `budget` bytes (each byte read comes
+    // off it: afterButtons() shares one kMaxBytesPerPass budget between both ports), and handles at
     // most one. Returns true when it handled one: answered it, or found it can't be answered yet (reply
     // queue full, EEPROM busy), in which case it stays in `reader` for a later pass and bytes arriving
     // meanwhile are read and dropped so the UART's RX buffer can't overflow. The Pi sends one request at
     // a time and resends after a timeout.
     template <class Serial>
-    bool pump(Serial &port, LineReader &reader, ReplyPort &replies) {
-        uint8_t budget = kMaxBytesPerPass;
+    bool pump(Serial &port, LineReader &reader, ReplyPort &replies, uint8_t &budget) {
         while (true) {
             if (reader.ready()) {
                 if (protocol_.handleLine(reader.line(), replies)) {
@@ -137,6 +137,13 @@ class Runtime {
         }
     }
 
+    // pump() with its own fresh kMaxBytesPerPass budget (for tests and tools that read one port).
+    template <class Serial>
+    bool pump(Serial &port, LineReader &reader, ReplyPort &replies) {
+        uint8_t budget = kMaxBytesPerPass;
+        return pump(port, reader, replies, budget);
+    }
+
     // The background unit: protocol work (a DUMP line, a SUM step, a write's reply, a CTL event), the
     // announce (not while `mayAnnounce` is false: a controller fault; a due announce then waits for the
     // fault to clear), and the battery report (which carries on through a fault). Each waits for room.
@@ -162,7 +169,8 @@ class Runtime {
     //   - a pass that fired a press reads no request and runs no background unit;
     //   - the first pass without a press after one that handled a request runs the background unit;
     //   - any other pass handles at most one request (WCB first, then USB) and, if it handled none,
-    //     runs the background unit;
+    //     runs the background unit; both ports share one kMaxBytesPerPass read budget a pass (USB
+    //     gets what the WCB left), so the reads are bounded whatever arrives;
     // then finishPass() into `wcbOut`, every pass. No unit waits more than one pass for another.
     template <class WcbIn, class UsbIn, class Out>
     void afterButtons(uint32_t nowMs, bool fired, bool faulted, Link<WcbIn> wcb, Link<UsbIn> usb, Out &wcbOut) {
@@ -174,7 +182,8 @@ class Runtime {
             background(nowMs, !faulted);
             backgroundOwed_ = false;
             lastWork_ = Work::Background;
-        } else if (pump(wcb.port, wcb.lines, wcb.replies) || pump(usb.port, usb.lines, usb.replies)) {
+        } else if (uint8_t budget = kMaxBytesPerPass;
+                   pump(wcb.port, wcb.lines, wcb.replies, budget) || pump(usb.port, usb.lines, usb.replies, budget)) {
             backgroundOwed_ = true;
             lastWork_ = Work::Request;
         } else {

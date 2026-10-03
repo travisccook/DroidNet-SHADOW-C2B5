@@ -46,12 +46,13 @@ the drain.
 `loop()` becomes (fault path in brackets):
 
 ```
-readUSB()                         [fault: skip to "requests"]
+readUSB()                         [fault: skip to "serviceMapping"]
 footMotorDrive(); domeDrive()     motors first, as now
 fired = mappedButtons()
 toggleSettings()
-requests or background            (the rule below)
-batteries; EEPROM step; drain     every pass, faults included
+serviceMapping(fired, faulted)    every pass, faults included:
+    watchBatteries()
+    afterButtons(): requests or background (the rule below), then the EEPROM step and the drain
 printOutput()
 ```
 
@@ -64,7 +65,8 @@ so a request no longer delays the motors' pass at all.
   Bytes wait in the UART's 64-byte RX buffer (9600 baud fills about 1 byte a millisecond).
 - **The first pass without a press after one that handled a request** runs the background unit and reads no
   request bytes (a press pass in between doesn't cancel the background unit it is owed).
-- **Any other pass** pumps the ports (WCB first, then USB) until one request is handled or the bytes run out. If it
+- **Any other pass** pumps the ports (WCB first, then USB) until one request is handled or the bytes run out. Both
+  ports share one 64-byte read budget a pass (USB gets what the WCB left), so a pass never reads more than 64 bytes. If it
   handled a request, the pass ends there; otherwise it runs the background unit.
 
 A request counts as handled when `handleLine` ran on it, answered or not (a GET of a slot the busy EEPROM holds
@@ -178,8 +180,8 @@ events carry the same slot, key and source), or turn `SHADOW_VERBOSE` back on fo
   then one, covers it): `SM_TIMING_REPORT_ONLY` removed, so any figure at or over 1 ms fails. New figures: a press with each request kind arriving, two requests, the background unit
   in the pass after a request, presses while commands wait for room.
 - `test_scheduler` (new): the rule's three cases; a press pass reads nothing; alternation under sustained requests
-  (requests and background both progress); a DUMP and a stream of GETs both finish; the battery report and announce
-  still go out during a DUMP; the fault path follows the rule.
+  (requests and background both progress); a DUMP and a stream of GETs both finish; the battery report goes out after
+  a DUMP ends and the announce waits for room the same way; both ports share one read budget; the fault path follows the rule.
 - TX and deferral: several presses into a queue held full by a DUMP all send their commands, in order, none
   dropped; two presses deferred in one pass both fire; a deferred entry past 250 ms or whose controller left is
   dropped; while a command waits, no reply is queued.

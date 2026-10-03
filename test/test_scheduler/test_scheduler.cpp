@@ -163,6 +163,24 @@ static void test_one_request_a_pass_over_both_ports() {
     TEST_ASSERT_EQUAL_UINT32(1, rig->usb.log.count);
 }
 
+// One 64-byte read budget a pass, shared by both ports: 64 junk bytes on the WCB leave the USB port
+// nothing, so its request is read (and handled) on a later pass.
+static void test_both_ports_share_one_read_budget() {
+    char junk[Runtime::kMaxBytesPerPass + 1];
+    memset(junk, 'j', Runtime::kMaxBytesPerPass);
+    junk[Runtime::kMaxBytesPerPass] = '\0';
+    rig->wcbIn.add(junk);
+    rig->usbIn.addLine("@SM HELLO");
+    const size_t usbWaiting = rig->usbIn.unread();
+    expectWork(Runtime::Work::Background, pass());  // no request completed: the background unit
+    TEST_ASSERT_EQUAL_UINT32(0, rig->wcbIn.unread());
+    TEST_ASSERT_EQUAL_UINT32(usbWaiting, rig->usbIn.unread());  // not a USB byte read
+    TEST_ASSERT_EQUAL_UINT32(0, rig->usb.log.count);
+    expectWork(Runtime::Work::Request, pass());
+    TEST_ASSERT_EQUAL_UINT32(0, rig->usbIn.unread());
+    TEST_ASSERT_EQUAL_UINT32(1, rig->usb.log.count);
+}
+
 // A DUMP keeps the queue busy while GETs come in one at a time (the Pi waits for each reply): both
 // finish, and every GET is answered.
 static void test_a_dump_and_gets_both_finish() {
@@ -254,6 +272,7 @@ int runAllTests() {
     RUN_TEST(test_the_background_unit_follows_each_request);
     RUN_TEST(test_a_press_doesnt_cancel_the_background_unit_it_owes);
     RUN_TEST(test_one_request_a_pass_over_both_ports);
+    RUN_TEST(test_both_ports_share_one_read_budget);
     RUN_TEST(test_a_dump_and_gets_both_finish);
     RUN_TEST(test_the_battery_report_still_goes_out_after_a_dump);
     RUN_TEST(test_a_faulted_pass_follows_the_rule);

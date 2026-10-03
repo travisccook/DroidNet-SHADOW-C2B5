@@ -357,6 +357,34 @@ static void test_loop_passes() {
     }
     recordPass(PSTR("loop pass: DUMP (worst slot) + battery and announce due + drain"), w);
 
+    // The same, with 63 bytes of other traffic (no CR, so no @SM line completes) on Serial1 and on
+    // Serial every pass: the two ports share one 64-byte read budget, so the pass reads 64 bytes
+    // and still runs the background unit.
+    worstState();
+    settle(now);
+    drainAll();
+    runtime.startAnnounce(0, 42);
+    runtime.startBattery(port, 0);
+    request(PSTR("@SM DUMP"));
+    char junk63[64];
+    memset(junk63, 'j', 63);
+    junk63[63] = '\0';
+    w = WorstPass();
+    now = 300000UL;
+    for (uint16_t i = 0; i < 2400 && protocol.opInProgress(); ++i) {
+        now += 10;
+        SerialPoke::clearRx(Serial1);
+        SerialPoke::clearRx(Serial);
+        SerialPoke::inject(Serial1, junk63);
+        SerialPoke::inject(Serial, junk63);
+        loopPass(now, kNone, kNone, 1, 1);
+        w.add(gLast);
+    }
+    TEST_ASSERT_FALSE(protocol.opInProgress());
+    recordPass(PSTR("loop pass: 63 junk bytes on each port + background unit (DUMP line, battery and announce due) + drain"), w);
+    SerialPoke::clearRx(Serial1);
+    SerialPoke::clearRx(Serial);
+
     // A SET of F CIRCLE LEFTL (an erased long-press slot: all 18 bytes written) arriving over
     // Serial1 while F CIRCLE RIGHT is held for its long press. The EEPROM stays busy for two
     // passes after each byte (3.4 ms on the Mega), so the long press can come due mid-write and
