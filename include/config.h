@@ -17,7 +17,8 @@
 // ---------------------------------------------------------------------------------------
 
 //#define SHADOW_DEBUG   // uncomment this for console DEBUG output
-#define SHADOW_VERBOSE // uncomment this for console VERBOSE output
+//#define SHADOW_VERBOSE // uncomment this for console VERBOSE output (bench only: printOutput() blocks the loop
+                         // while it sends, several ms a pass when driving; see WIPDocs/TIMING_ROUND_2_DESIGN.md)
 
 // Firmware version, reported to DroidNet (@SM HELLO) and in the WCB device announce. The
 // firmware build sets it to the git commit (scripts/git_rev.py, "+" if the tree had
