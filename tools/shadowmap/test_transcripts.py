@@ -15,11 +15,29 @@ is checked this way:
   differences are the documented ones (COINCIDE);
 - without the time-driven lines (battery reports and announces, which land wherever their time
   falls), a session with one thing at a time is the same sequence of lines as before;
-- a GET's round trip is at most two passes longer; a SUM's stays under 0.5 s.
+- a GET's round trip is at most two passes longer (unless a battery report or announce drains in
+  its window, see test_round_trips); a SUM's stays under 0.5 s.
 
-One difference applies to every session: a READY sent in the first pass after a (re)boot names the
-controllers that pass sees (buttons() and setPads now run before the request); 0a8b73f, reading
-the request first, said "pads=-" (normalize). Every session runs at once and paced at 2 bytes a pass.
+The documented differences from 0a8b73f, each tied to the script line that causes it:
+
+1. a press's command or PRESS event now goes before a reply, where a request landed in the press's
+   pass (the per-stream comparison needs no patch for it);
+2. a SET in a press's pass gives that press the slot's previous key (COINCIDE);
+3. a PRESS event that 0a8b73f dropped for want of room is now sent, or the reverse, where a request
+   or a full TX queue met a press (events are best-effort) (COINCIDE);
+4. a READY sent in the first pass after a (re)boot names the controllers that pass sees, where
+   0a8b73f, reading the request first, said "pads=-" (normalize); likewise a controller's
+   "@SM CTL" event when "@SM EVENTS 1" arrives in the pass that controller connects (buttons() and
+   setPads now run before the request; no session here hits it);
+5. a button command that 0a8b73f dropped for want of TX-queue room is now sent later, in order
+   (no session here hits it);
+6. a request queued behind one that can't be answered yet is read and dropped: 0a8b73f's rule,
+   which 0a8b73f also hits at 9600 baud (the paced run); the Pi sends one request at a time and
+   resends on silence (COINCIDE);
+7. a second request already in the RX buffer waits one pass (design section 3), so a background
+   line (here a DUMP line) can go before its reply (COINCIDE and COINCIDE_PACED).
+
+Every session runs at once and paced at 2 bytes a pass.
 
     python3 -m unittest tools/shadowmap/test_transcripts.py      (from the repo root)
 """
@@ -115,19 +133,26 @@ def streams(text: str):
     return out
 
 
-def idle_blocks(text: str):
-    """How long each script line took (the clock between "!!IDLE" lines)."""
-    out, prev = [], 0
+def idle_windows(text: str):
+    """(how long, the lines sent) for each script line, between "!!IDLE" lines."""
+    out, prev, sent = [], 0, []
     for line in text.split("\n"):
         m = re.match(r"^!!IDLE (\d+)", line)
         if m:
-            out.append(int(m.group(1)) - prev)
-            prev = int(m.group(1))
+            out.append((int(m.group(1)) - prev, sent))
+            prev, sent = int(m.group(1)), []
+        elif line:
+            sent.append(line)
     return out
 
 
-# The documented differences where a request lands in the pass a press fires (coincide, not paced;
-# the script lines are tools/shadowmap/golden/v3/coincide.in's, from 1):
+def timed_line_in(lines) -> bool:
+    """True when a battery report or an announce (lines sent on a timer, not in reply) is among them."""
+    return any(line.startswith("@WDP") or re.match(r"^(;W\d+,?)?;S0@SM BAT ", line) for line in lines)
+
+
+# The documented differences in the coincide session, not paced (the script lines are
+# tools/shadowmap/golden/v3/coincide.in's, from 1). Where a request lands in the pass a press fires:
 #   - a SET taken in during a press's pass used to be taken in before the press, which then sent
 #     the new key; the press now comes first and sends the slot's previous key, and the SET takes
 #     effect a pass later: line 7 (SET F NONE LEFT) meeting line 8 (press LEFT), and line 9
@@ -136,6 +161,14 @@ def idle_blocks(text: str):
 #     are best-effort); the press now queues its event first: line 14 (press DOWN, with line 12's
 #     HELLO and line 13's GET waiting) and line 18 (hold L1+UP, with lines 15-17's DUMP, GET and
 #     SET waiting): the two events inserted at 3.
+# Where requests queue behind a DUMP (lines 15-17, all three waiting when line 18's press fires):
+#   - category 6: the press pass reads nothing; the DUMP (15) is handled the pass after and its
+#     first line fills the TX queue in the background pass owed after it; the GET (16) then can't
+#     be answered yet, so the bytes behind it, the whole SET F NONE RIGHT (17), are read and
+#     dropped. 0a8b73f had handled all three in one pass with the queue empty and answered the SET
+#     "ERR busy" (the DUMP was running); now that reply isn't sent;
+#   - category 7: the GET (16) waits behind the DUMP's background pass, so its reply now follows
+#     the DUMP's first line (SLOT F NONE UP) instead of going before it.
 COINCIDE = {
     "commands": [("replace", 1, ";W1;Cscaredsound"), ("replace", 2, ";W1;Cangrysound")],
     "events": [
@@ -143,16 +176,46 @@ COINCIDE = {
         ("replace", 2, reply("@SM PRESS F NONE DOWN angrysound default")),
         ("insert", 3, [reply("@SM PRESS F NONE DOWN pressed eeprom"), reply("@SM PRESS F L1 UP extremehappysou default")]),
     ],
+    "replies": [
+        ("drop", 9, reply("@SM ERR busy SET F NONE RIGHT")),  # line 17 (category 6)
+        ("move", 8, 9, reply("@SM SLOT D L1 L3 frontholocenter default def=frontholocenter")),  # line 16 (category 7)
+    ],
+}
+
+# The coincide session paced at 2 bytes a pass. Category 7: while the GET on line 16 waits for room
+# (the DUMP from line 15 is running), a pass that couldn't answer it is followed by a background
+# pass, so when room frees up the DUMP's second line (SLOT F NONE RIGHT) can take it first; 0a8b73f,
+# reading requests first every pass, answered the GET between the DUMP's first and second lines.
+# (The SET on line 17 is dropped here by 0a8b73f too: no category 6 patch.)
+COINCIDE_PACED = {
+    "replies": [
+        ("move", 8, 9, reply("@SM SLOT D L1 L3 frontholocenter default def=frontholocenter")),  # line 16 (category 7)
+    ],
 }
 
 
 def patched(lines, patches):
+    """The golden lines with `patches` applied in order. "drop" and "move" name the line they act on,
+    so a patch can't quietly hit a different line:
+      ("replace", i, line)       line i becomes `line`
+      ("insert", i, [lines])     `lines` go in before line i
+      ("drop", i, line)          line i, which must be `line`, goes
+      ("move", i, j, line)       line i, which must be `line`, is taken out and put back at j"""
     out = list(lines)
-    for op, at, value in sorted(patches, key=lambda p: -p[1]):
+    for p in patches:
+        op, at = p[0], p[1]
         if op == "replace":
-            out[at] = value
+            out[at] = p[2]
+        elif op == "insert":
+            out[at:at] = p[2]
+        elif op == "drop":
+            assert out[at] == p[2], (op, at, out[at])
+            del out[at]
+        elif op == "move":
+            assert out[at] == p[3], (op, at, out[at])
+            out.insert(p[2], out.pop(at))
         else:
-            out[at:at] = value
+            raise ValueError(op)
     return out
 
 
@@ -180,8 +243,10 @@ class TranscriptTest(unittest.TestCase):
                 want, got = streams(golden(tag)), streams(run(name, paced)[0])
                 for k in STREAMS:
                     g, n = normalize(want[k], got[k])
-                    if name == "coincide" and not paced and k in COINCIDE:
-                        g = patched(g, COINCIDE[k])
+                    if name == "coincide":
+                        patches = COINCIDE_PACED if paced else COINCIDE
+                        if k in patches:
+                            g = patched(g, patches[k])
                     with self.subTest(session=tag, stream=k):
                         self.assertEqual(g, n)
 
@@ -201,10 +266,16 @@ class TranscriptTest(unittest.TestCase):
             script = [line for line in make() if not line.startswith("!!QUEUE")]
             for paced in (0, tx.PACED):
                 tag = name + (".paced" if paced else "")
-                before, after = idle_blocks(golden(tag)), idle_blocks(run(name, paced)[0])
+                before, after = idle_windows(golden(tag)), idle_windows(run(name, paced)[0])
                 self.assertEqual(len(script), len(after), tag)
-                for line, a, b in zip(script, before, after):
-                    if line.startswith("@SM GET "):
+                for line, (a, sent_a), (b, sent_b) in zip(script, before, after):
+                    # A GET whose window, in either run, also drains a battery report or an announce
+                    # isn't timed: those go out on a timer, and the window measures their drain too.
+                    # The GET's own reply time is unchanged there, but Task 2's cap of 4 EEPROM reads
+                    # a step makes earlier writes a few passes longer, so the periodic battery report
+                    # drains in a different script line's window (requests, line 73: +50 ms, line 74:
+                    # -50 ms). Every other GET keeps the two-pass limit.
+                    if line.startswith("@SM GET ") and not (timed_line_in(sent_a) or timed_line_in(sent_b)):
                         with self.subTest(session=tag, line=line):
                             self.assertLessEqual(b - a, 2 * tx.PASS_MS)  # at most two passes longer
                     if line.startswith("@SM SUM *"):
