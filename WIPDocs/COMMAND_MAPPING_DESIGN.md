@@ -19,6 +19,8 @@ DroidNetSignalBooster repo: [backend design](https://github.com/travisccook/Droi
   stored command (see [Double taps](#double-taps)).
 - **Every combo can also be held** for a long press (except L3) and map to a third stored
   command (see [Long presses](#long-presses)).
+- **Any slot can hold a raw command instead:** up to 15 characters that SHADOW sends to the WCB
+  exactly as typed, with no prefix and no suffix (see [Raw commands](#raw-commands)).
 - **Where the mappings live:**
   - The built-in defaults are in `src/default_mappings.cpp`.
   - DroidNet can change any combo at runtime, over the WCB link, with the controllers connected.
@@ -77,6 +79,9 @@ WCB references are to `travisccook/Wireless_Communication_Board-WCB` `main` at `
 5. **The link runs at 9600 baud in a noisy droid.** Every line in both directions carries a
    CRC32.
 
+The one deliberate exception to rules 1 and 2 is a [raw command](#raw-commands): the owner typed it,
+so SHADOW sends it as typed, bare or with `^` or `;T`. It never appears unencoded in an `@SM` line.
+
 ## Slots
 
 The mapping is a fixed grid: `index = tap*72 + controller*36 + modifier*6 + button`, which gives
@@ -106,6 +111,25 @@ held for a long press.
 A test replays every button combination (32,128 states) through the old table code and the new
 resolver. The results are identical except volume and brightness, which were removed on
 purpose.
+
+### Raw commands
+
+Added 2026-10-03 (protocol v4). Design: `WIPDocs/RAW_COMMANDS_DESIGN.md`. Any slot (single press, double
+tap or long press) can hold a raw command instead of a stored-command key: 1-15 printable ASCII
+characters (0x20-0x7E, space included), never empty (empty means unmapped).
+
+- **Sent exactly as typed:** the text and `\r`, with no prefix, no suffix and no respelling for a
+  board's `?CMDCHAR`/`?FUNCCHAR`/`?DELIM`. 15 + 1 bytes is within `kCommandHeadroom` (34), so a raw
+  press can't be crowded out either (`pushRaw`).
+- **What the WCB does with it** depends on its first character: the command character (`;`) makes it
+  a WCB command, the function character (`?`) a settings command on SHADOW's WCB, anything else is
+  broadcast to every serial port on every board. `^` and `;T` inside it do what they always do on a
+  WCB.
+- **Stored as a record with bit 7 of its first byte set** (`kRawFlag`): printable text never sets it,
+  so the flag costs no characters, and no caller of `MapStore` sees it (`keyForSlot` reports it
+  separately). See EEPROM layout.
+- **On the wire** a raw command is `!` and its bytes in upper-case hex (see Protocol reference).
+- **Built-in defaults stay stored-command keys.**
 
 ### Double taps
 
@@ -229,6 +253,12 @@ The layout uses 3952 of the 4096 bytes. Nothing else uses EEPROM.
   still reads the same EEPROM (v1 stops at 0x550, v2 at 0xA60). Long-press slots read as blank,
   which is unmapped, until DroidNet sets one. A DEFAULTS from any firmware clears all three banks.
 
+- **Raw commands came later, without a new layout.** A raw record is the text with bit 7 of its first
+  byte set, then NULs, under the same CRC (the flag is covered). `slotRecordValid` accepts a key or a
+  raw record (flag set, 1-15 bytes, each 0x20-0x7E with the flag cleared, NUL-terminated). Firmware
+  from before raw commands fails its key check on a raw record and reads that slot's built-in default,
+  as for a record that failed its CRC, so going back to older firmware is safe.
+
 - **Two header copies.** Headers are written alternately, and the valid one with the newer
   sequence wins (wraparound-safe). A power cut mid-header-write leaves the other copy in force.
 - **Per-slot CRC.** A slot is live as soon as it's written. A slot that fails its CRC reads as its
@@ -244,13 +274,19 @@ The layout uses 3952 of the 4096 bytes. Nothing else uses EEPROM.
 - **Firmware uploads keep it.** Bootloader uploads don't erase EEPROM (`avrdude -D`, PlatformIO).
   A future firmware with a new layout version falls back to defaults.
 
-## Protocol reference (v3)
+## Protocol reference (v4)
 
 v2 added the double-tap slots: `slots=144`, 144 lines in a DUMP, and button tokens like `UP2`.
 v3 adds the long-press slots: `slots=216`, 216 lines in a DUMP, and `UPL` tokens. Nothing else
-changed. A v1 or v2 client refuses a v3 SHADOW at HELLO. DroidNet speaks all three (it only shows
-double taps to a v2 SHADOW and long presses to a v3 one); the reference client (`tools/shadowmap/`)
-speaks v3 only.
+changed. v4 adds raw commands: wherever a slot's command appears (`OK SET`, `SLOT` in GET and DUMP,
+`PRESS`), a raw command is `!` and its bytes in upper-case hex (`!3B57323B5334504C41593A33` is
+`;W2;S4PLAY:3`), and `SET` takes one; keys are `[A-Za-z0-9_]`, so a `!` token is never a key, and the
+WCB never sees a raw command's `;`, `^` or `;T` in an `@SM` line. SHADOW accepts the hex in either
+case and sends upper case. `def=` never carries a raw command. `SUM` is unchanged in definition: the
+CRC32 over the `SLOT` bodies, `!<hex>` included. A client from before v4 refuses a v4 SHADOW at
+HELLO. DroidNet speaks v1 to v4 (it only shows double taps to a v2 SHADOW, long presses to a v3 one
+and raw commands to a v4 one, and sends `SET ... !<hex>` only to v4); the reference client
+(`tools/shadowmap/`) speaks v4 only.
 
 Every line is one of these:
 
@@ -262,7 +298,11 @@ digits. SHADOW accepts upper or lower case and sends upper case.
 
 - **CRC on the WCB port:** required. A request without it, or with a wrong one, gets
   `@SM ERR crc`. On the USB port the CRC is optional.
-- **Lengths:** requests are at most 72 characters; replies at most 80, before the route.
+- **Lengths:** requests are at most 72 characters (the longest, a raw `SET`, is 65); replies at most 96
+  (`Protocol::kMaxLine`), before the route. The longest is a `SLOT` with a 15-character raw command
+  over a 15-character default on `F CIRCLE RIGHTL`: 93. A `PRESS` with a raw command and `from=` is 81.
+  An event is sent only when its port has room for that line itself (not for `kMaxLine`), and never
+  while a press waits for the TX queue.
 - **Terminators:** lines end in `\r` or `\n`.
 - **Tokens:** separated by single spaces.
 - **Slots:** written as `<C> <M> <B>`, e.g. `F L1 UP`, `F L1 UP2` for its double tap, or `F L1 UPL` for its long press.
@@ -273,10 +313,10 @@ digits. SHADOW accepts upper or lower case and sends upper case.
 
 | Request | Reply |
 | --- | --- |
-| `HELLO [route]` | `READY v3 fw=<ver> slots=216 gen=<g> fmt=<0\|1> pads=<FD\|F\|D\|->`. `route` sets where replies go on the WCB port: `0` (the default) = `;S0`, `n` = `;W<n>;S0`. It is kept in RAM, so the Pi should send HELLO after SHADOW reboots. |
+| `HELLO [route]` | `READY v4 fw=<ver> slots=216 gen=<g> fmt=<0\|1> pads=<FD\|F\|D\|->`. `route` sets where replies go on the WCB port: `0` (the default) = `;S0`, `n` = `;W<n>;S0`. It is kept in RAM, so the Pi should send HELLO after SHADOW reboots. |
 | `CFG` | `CFG pre=<hex> suf=<hex\|->` |
-| `GET <slot>` | `SLOT <slot> <key\|-> <src> def=<key\|->`, or for a reserved slot `SLOT <slot> - reserved res=<reason>`. `src` is `eeprom`, `default` or `reserved`. |
-| `SET <slot> <key\|->` | `OK SET <slot> <key\|->` once written and verified. `-` unmaps the slot, as a custom value. |
+| `GET <slot>` | `SLOT <slot> <key\|!hex\|-> <src> def=<key\|->` (`!hex`: a raw command), or for a reserved slot `SLOT <slot> - reserved res=<reason>`. `src` is `eeprom`, `default` or `reserved`. |
+| `SET <slot> <key\|!hex\|->` | `OK SET <slot> <key\|!HEX\|->` once written and verified. `-` unmaps the slot, as a custom value. `!hex` (either case) sets a raw command; the echo is upper case. |
 | `REVERT <slot>` | `OK REVERT <slot>`. The slot is back on its built-in default (`src=default`). |
 | `DUMP` | 216 `SLOT` lines in slot order (single presses, double taps, then long presses), then `END DUMP 216`. About 12.5 s at 9600 baud. |
 | `SUM` | `SUM <8 hex> slots=216`: the CRC32 over, for each slot in order, its `SLOT` line text after `@SM SLOT ` plus `\n`. The Pi can compute the same over a cached DUMP and skip the DUMP when they match. About 0.4 s. |
@@ -292,7 +332,7 @@ These are only sent with `EVENTS 1`, and are dropped rather than queued if the l
 
 | Event | When |
 | --- | --- |
-| `PRESS <slot> <key\|-> <src> [from=<F\|D>] [res=<reason>]` | Any combo that reaches the mapping, mapped or not, when it fires: a double tap as `UP2`, a long press as `UPL` when it fires, a combo that waited for a second tap when its window closes. `from=` means the modifier was held on that other controller. |
+| `PRESS <slot> <key\|!hex\|-> <src> [from=<F\|D>] [res=<reason>]` | Any combo that reaches the mapping, mapped or not, when it fires: a double tap as `UP2`, a long press as `UPL` when it fires, a combo that waited for a second tap when its window closes. `from=` means the modifier was held on that other controller. |
 | `CTL <F\|D> <0\|1>` | A controller connected or dropped |
 
 ### Battery reports
@@ -360,7 +400,7 @@ The format is `ERR <code> [<VERB> [<slot>]]`.
 | `verb` | Unknown verb |
 | `slot` | Not a valid `<C> <M> <B>` |
 | `reserved` | The slot is reserved |
-| `key` | Not `[A-Za-z0-9_]{1,15}` or `-` |
+| `key` | Not `[A-Za-z0-9_]{1,15}`, `-`, or `!` and the hex of 1-15 bytes 0x20-0x7E (odd length, a bad digit, `!`, `!-`, a NUL, 16 or more bytes) |
 | `prefix` / `suffix` | The value breaks the rules above |
 | `eeprom` | The write didn't verify after one retry |
 
@@ -420,6 +460,9 @@ That replaces the old control-mapping spreadsheet, which is retired. DroidNet ow
 - Reserved slots are left out.
 - Version 2 (DroidNetSignalBooster `193851b`) adds the double taps under their wire names (`"UP2": {...}`) next to the
   single presses. DroidNet imports version 1 and 2 files.
+- Version 3 adds the long presses (`"UPL": {...}`), and version 4 marks a raw command with
+  `"raw": true` (`{"key": ";W2;S4PLAY:3", "src": "eeprom", "raw": true}`). DroidNet imports
+  versions 1 to 4.
 - `labels` are DroidNet's descriptions of the WCB stored commands, kept on the Pi. SHADOW never sees them.
 
 ## Firmware structure
@@ -441,7 +484,7 @@ The library has no Arduino dependency, so it builds and tests on the host.
 ## Timing and memory
 
 - **Loop time.** Worst-case time the mapping adds to one loop pass, measured on the emulated
-  ATmega2560 at 16 MHz by the `test_avr_timing_*` suites (132 figures; Timer1, interrupts off,
+  ATmega2560 at 16 MHz by the `test_avr_timing_*` suites (161 figures; Timer1, interrupts off,
   Serial1 idle so each drain moves 64 bytes, 15-character keys and defaults). Every figure is under
   1 ms, enforced by `test_avr_timing_*` (a figure at or over 1 ms fails the suite).
 
@@ -451,30 +494,42 @@ The library has no Arduino dependency, so it builds and tests on the host.
   - The first pass without a press after one that handled a request runs the background unit and
     reads no request bytes.
   - Any other pass pumps the ports (WCB first, then USB) until one request is handled or the bytes
-    run out; if none was handled, it runs the background unit. Both ports share one 64-byte read
-    budget a pass (USB gets what the WCB left).
+    run out; if none was handled, it runs the background unit. Both ports share one 32-byte read
+    budget a pass (`kMaxBytesPerPass`; USB gets what the WCB left). It was 64 until raw commands: with
+    the 93-character SLOT line the worst read pass measured 988.5 us, 11.5 us under the limit. A long
+    request now takes one more pass to read.
+  - **The EEPROM writer's finishing step** (`MapStore::finishDue()`, the verify that ends a write) is
+    put off one pass when the pass handled a request; its other steps run every pass. A full-budget
+    request answered in the same pass as a finishing step measured 1022.5/1036.5 us without this
+    (it existed in round 2 too, unmeasured). The put-off step runs in the next pass.
 
   **Waiting presses.** A press that can't go (EEPROM mid-write, no room in the TX queue, or already
-  three fired this pass) waits in a FIFO of 8 and fires in order, at most 3 presses a pass
-  (`kMaxFiresPerPass`); one older than 250 ms or whose controller has gone is dropped. While any
+  two fired this pass) waits in a FIFO of 8 and fires in order, at most 2 presses a pass
+  (`kMaxFiresPerPass`, 3 until raw commands: a PRESS event is now checked against its own length, so
+  more PRESS lines go out, and three presses plus a write's last step had reached 1090.5 us); one older than 250 ms or whose controller has gone is dropped. While any
   press waits, the TX queue is held for its command (the hold).
 
   **Worst figures:**
 
   | us | Pass |
   |---:|---|
-  | 944.5 | 63 RX bytes ending the worst GET, answered, + drain |
-  | 892.0 | three presses + a write's last step (the worst press-only pass) |
-  | 866.0 | three presses in one pass (one deferred) |
-  | 812.5 | four presses due in one pass (three fire, one waits a pass) |
-  | 806.5 | GET pass: F CIRCLE RIGHTL (15-char key over 15-char default) |
-  | 784.0 | 63 junk bytes on each port (one shared 64-byte budget) + background unit (DUMP line, battery, announce) + drain |
+  | 914.5 | three presses due + a write's last step: two fire, one waits (the worst press-only pass) |
+  | 906.5 | full 32-byte budget ending a raw GET, the 93-character SLOT answered, + battery change + drain (the worst read pass) |
+  | 904.0 | the same GET answered as a raw SET's (or DEFAULTS') finishing step comes due |
+  | 901.0 | GET pass: raw command on F CIRCLE RIGHTL, 93-character SLOT line |
+  | 881.5 | three raw presses due + a raw SET's last step: two fire, one waits |
+  | 811.0 | GET pass: F CIRCLE RIGHTL (15-char key over 15-char default) |
+  | 713.5 | four presses due in one pass (two fire, two wait a pass) |
+  | 708.5 | 32 junk bytes read + battery report + DEFAULTS' finishing step + drain (the worst junk pass) |
+
+  Round 2 (`5443ae6`) had 944.5 for the 63-byte read, 892.0 for three presses + a write's last step and
+  812.5 for four presses due (three fire).
 
   Before round 2 (Part A, `52df1b9`): 5 of 126 figures at or over 1 ms, worst 1.115 ms; at `0a8b73f`, 61.
 
-  - The worst whole pass is the 63-byte read that ends with the worst GET, answered, plus the drain:
-    944.5 us, 56 us under the limit. @SM v4's longer lines (`kMaxLine` 96, a 93-character SLOT) will
-    grow this pass, so the raw-commands work must re-measure it.
+  - The worst whole pass is the three-press pass with a write's last step, 914.5 us, 85.5 us under the
+    limit; the worst read pass is 906.5 us. Round 2's 944.5 us read pass became 906.5 us with the
+    32-byte budget and the longer v4 lines (`kMaxLine` 96).
   - While a WCB request can't be answered yet, the USB port isn't read. The request waits for room in
     the TX queue (the 9600-baud drain frees it, about 1 byte a ms) or for the EEPROM write to finish
     (a few ms a byte). This only matters on the bench, where the USB port is used.
@@ -499,21 +554,23 @@ The library has no Arduino dependency, so it builds and tests on the host.
   write), REVERT 159-175 ms, DUMP 4.41 s to `END DUMP 72`. Those were v1, before double taps; expect a
   DUMP of about 12.5 s (v3, 216 slots) and a SUM of about 0.3 s now (not yet measured on the droid).
 - **Memory:**
-  - Static SRAM is 2018 bytes (`pio run -e SHADOWC2B5`: "used 2018 bytes from 8192 bytes"), down
+  - Static SRAM is 2028 bytes (`pio run -e SHADOWC2B5`: "used 2028 bytes from 8192 bytes"), down
     from 3801 before the runtime mapping (the tables, descriptions and switch strings are gone).
     Double taps added 89 of them; timing Part A saved 21 (the hex digit table went to flash).
     Part A left it at 2895. Turning `SHADOW_VERBOSE` off in round 2 saved about 930 bytes (to 1969);
-    the round's own growth is 49 bytes, inside the 64-byte budget (limit 1969 + 64 = 2033).
-  - Flash is 54,404 of 253,952 bytes (56,264 after Part A, with `SHADOW_VERBOSE` on; 53,126 before
+    the round's own growth was 49 bytes, inside the 64-byte budget (limit 1969 + 64 = 2033). Raw commands
+    (2026-10-03) added 10: `opArg_` grew from 23 to 32 bytes (+9), the rest is the store's and the
+    runtime's new state (not itemised). The line buffers grew by 16 bytes each, on the stack.
+  - Flash is 55,306 of 253,952 bytes (54,404 at round 2; 56,264 after Part A, with `SHADOW_VERBOSE` on; 53,126 before
     Part A).
 
 ## Testing
 
 ```bash
-pio test -e native                        # host: 185 tests (+35 AVR-only, skipped)
-pio test -e simavr --without-uploading    # emulated ATmega2560: 219 (+1 host-only, skipped)
+pio test -e native                        # host: 212 tests (+43 AVR-only, skipped)
+pio test -e simavr --without-uploading    # emulated ATmega2560: 254 (+1 host-only, skipped)
 python3 -m unittest tools/shadowmap/test_shadowmap.py   # reference client vs. the firmware logic
-python3 -m unittest tools/shadowmap/test_transcripts.py # what SHADOW sends, against 0a8b73f
+python3 -m unittest tools/shadowmap/test_transcripts.py # what SHADOW sends, against golden/v4
 ```
 
 - **What's covered:**
@@ -525,19 +582,24 @@ python3 -m unittest tools/shadowmap/test_transcripts.py # what SHADOW sends, aga
     button commands always fitting during a DUMP
   - runtime timing, and the real EEPROM under simavr
   - every mapping pass's worst time (`test_avr_timing_*`; fails at 1 ms)
-  - waiting presses (`test_defer`): the FIFO, the hold, the three-a-pass limit, the 250 ms and
+  - waiting presses (`test_defer`): the FIFO, the hold, the two-a-pass limit, the 250 ms and
     controller-gone drops, commands that wait for TX room
   - the pass rule (`test_scheduler`): a press pass reads nothing, requests and the background unit
     both progress, a DUMP and a stream of GETs both finish, the fault path
   - the faster code against the code it replaced (`test_equiv_*`, `test_avr_crc_asm`,
-    `test_avr_uart1`), and transcripts of scripted sessions against goldens from `0a8b73f`
-    (`tools/shadowmap/test_transcripts.py`)
+    `test_avr_uart1`), and transcripts of scripted sessions against goldens in `tools/shadowmap/golden/v4`
+    (`tools/shadowmap/test_transcripts.py`; recorded from `0a8b73f` with raw commands' Tasks 1-3
+    applied, 10 documented categories of difference, plus a raw session)
   - double taps (`test_double_tap`): exclusive firing, the window, holds, taps after a double
     tap, both controllers, drops and faults, events
   - long presses (`test_long_press`, 24 cases): the threshold, releases before and after it, with
     and without a double tap, a double tap on a long-press combo, no repeat, another combo pressed
     while waiting, a modifier landing late, both controllers, drops and faults, the staleness rule,
     events
+  - raw commands (`test_store_raw`, `test_protocol_raw`, `test_raw_press`, `test_avr_timing_v4`): the
+    record and its flag (round trip, mid-write and queued reads, bad records, the downgrade rule, power
+    cuts), `!<hex>` on every line, bad hex, the longest lines, SUM over raw slots, a raw press sent as
+    typed with no prefix or suffix, its headroom, and a long command keeping its PRESS event
   - the Python client through a WCB emulator, including corrupted and dropped lines and a
     remote-WCB route
 - **If a simavr run hangs:** the test program has probably run out of the Mega's 8 KB of SRAM. On
@@ -548,6 +610,8 @@ python3 -m unittest tools/shadowmap/test_transcripts.py # what SHADOW sends, aga
 ## Not done yet
 
 - On the droid: real button presses, driving while editing, and a power cycle (HANDOFF_BUTTON_MAP.md §0).
+- On the droid: raw commands (2026-10-03). Worth checking: one raw command fired from a controller, and
+  that the owner's map survives the flash (SUM against DroidNet's saved copy).
 - On the droid: long presses. Worth checking: 600 ms on a Navigation controller, and the v3 DUMP
   time through the WCB.
 - On the droid: double taps (`bde79a4`). Tested on the host, simavr and through DroidNet against the simulator only.

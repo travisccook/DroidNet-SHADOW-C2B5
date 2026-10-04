@@ -222,7 +222,7 @@ with one exception, which the owner chose later.
 | `fw` = the git commit, from a PlatformIO `!python` build flag | Same (`scripts/git_rev.py`), plus `+` for a tree with uncommitted changes |
 | No `caps` | Same (an earlier draft here sent `shadow.map`; it's gone) |
 | No announce while a controller fault is active | Same (`serviceMapping(true)` on the `readUSB()` fault path skips it; a due announce goes out when the fault clears) |
-| **Announce only. SHADOW never reads Serial1.** | **Superseded.** On 2026-09-24 the owner chose to edit mappings over the WCB link so the controllers stay connected. SHADOW now reads `@SM` lines on Serial1, at most 64 bytes a pass, and drops everything else. |
+| **Announce only. SHADOW never reads Serial1.** | **Superseded.** On 2026-09-24 the owner chose to edit mappings over the WCB link so the controllers stay connected. SHADOW now reads `@SM` lines on Serial1, at most 32 bytes a pass (64 until raw commands, 2026-10-03; see `COMMAND_MAPPING_DESIGN.md`, Timing and memory), and drops everything else. |
 
 The rest of that handoff still stands and is yours to use:
 

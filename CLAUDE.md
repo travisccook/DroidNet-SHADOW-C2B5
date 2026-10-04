@@ -24,7 +24,7 @@ pio run -t clean                         # Clean
 pio check                                # clang-tidy
 pio test -e native                       # Unit tests on the host (lib/ShadowMap + defaults)
 pio test -e simavr --without-uploading   # Same tests on an emulated ATmega2560
-python3 -m unittest tools/shadowmap/test_shadowmap.py   # Pi-side client vs. the firmware logic
+python3 -m unittest tools/shadowmap/test_shadowmap.py tools/shadowmap/test_transcripts.py   # Pi-side client vs. the firmware logic; what SHADOW sends vs. tools/shadowmap/golden/v4
 ```
 
 `SHADOWC2B5` is the firmware environment (the default); `native` and `simavr` are test-only. Each firmware build also copies the firmware to `build/` via `scripts/post_build.py`. If a simavr test run hangs, that test program has probably run out of the Mega's 8 KB of SRAM (on AVR every Unity string literal lives in RAM): split the suite. If one is reported ERRORED with SIGKILL and no test lines, simavr crashed as it exited: tool-simavr 1.10800.0 overruns its 256-byte UART line buffer when a UART sends 256 bytes without a `\n`, so a test that drives Serial1 must send a `\n` now and then (see `SerialPoke::dropTx1` in `test/support/sm_avr_timing.h`). The timing suites (`test_avr_timing_*`) fail if a mapping pass reaches 1 ms; `-v` prints every pass's figure (`WIPDocs/COMMAND_MAPPING_DESIGN.md`, Timing and memory). Two `pio test` runs in the same checkout at once corrupt each other's builds (ERRORED with an empty `firmware.elf`).
@@ -34,7 +34,7 @@ python3 -m unittest tools/shadowmap/test_shadowmap.py   # Pi-side client vs. the
 - `src/main.cpp`: controller setup, fault detection, drive/dome motor control; reads the controllers into `sm::PadState` and hands button mapping to `sm::Runtime`; requests are handled after the motors, through `sm::Runtime::afterButtons()` (one request or one background unit a pass, none in a pass that fired a press)
 - `src/config.cpp` / `include/config.h`: speeds, baud rates, `SHADOW_WDP_ANNOUNCE`. `SHADOW_FW_VERSION` is set by the build to the git commit (`scripts/git_rev.py`)
 - `src/default_mappings.cpp`: the built-in button mappings (combo → WCB stored-command key) and the list of hardcoded combos. Every combo also has a double-tap slot (`UP2` on the wire; none on L3); a combo whose double tap is mapped waits `SHADOW_DOUBLE_TAP_MS` for a second press before firing its own command
-- `lib/ShadowMap/`: the runtime-editable button mapping (no Arduino dependency, so it builds and tests on the host): slot layout and lookup rule, EEPROM store, the `@SM` protocol DroidNet uses to edit mappings over the WCB link, controller battery levels (`sm_battery`), the Serial1 TX queue, and `sm::Runtime` (what `loop()` does for the mapping). Design and protocol reference: `WIPDocs/COMMAND_MAPPING_DESIGN.md`
+- `lib/ShadowMap/`: the runtime-editable button mapping (no Arduino dependency, so it builds and tests on the host): slot layout and lookup rule, EEPROM store, the `@SM` protocol DroidNet uses to edit mappings over the WCB link, controller battery levels (`sm_battery`), the Serial1 TX queue, and `sm::Runtime` (what `loop()` does for the mapping: at most 2 presses fire a pass, one 32-byte read budget a pass shared by both ports, and a write's finishing step put off a pass when the pass handled a request; every pass stays under 1 ms on the emulated Mega). Design and protocol reference: `WIPDocs/COMMAND_MAPPING_DESIGN.md`
 - `tools/shadowmap/`: reference Pi-side client (`shadowmap.py`, also a CLI), a host build of SHADOW's mapping side (`shadow_sim.cpp`), and their contract tests
 - `test/`: Unity tests for `native` and `simavr`, including a replay of every button combination through the old table code (`test_legacy_equivalence`)
 - `include/controller_macs.h`: the PS3 controller MAC addresses, which are the only check on who can connect and drive. It is gitignored; `include/controller_macs.example.h` is the committed template. Never commit real MAC addresses (or the Bluetooth dongle's address) anywhere in this repo.
@@ -49,8 +49,8 @@ python3 -m unittest tools/shadowmap/test_shadowmap.py   # Pi-side client vs. the
 
 ### Communication Protocols
 
-- **WCB**: `;W1;C<name>` tells WCB 1 to run its stored command `<name>`. Every mapped button sends `<prefix><key><suffix>\r` (default prefix `;W1;C`)
-- **@SM**: SHADOW's button-mapping protocol (see `WIPDocs/COMMAND_MAPPING_DESIGN.md`). Nothing SHADOW sends to the WCB may be a bare line (it gets broadcast to every board) or contain `^` or `;T`. The one bare line is the `@WDP1` device announce, which WCB 6.2.1+ captures; comment out `SHADOW_WDP_ANNOUNCE` for older WCB firmware
+- **WCB**: `;W1;C<name>` tells WCB 1 to run its stored command `<name>`. Every mapped button sends `<prefix><key><suffix>\r` (default prefix `;W1;C`), or, for a raw command, exactly the text the owner typed and `\r`
+- **@SM**: SHADOW's button-mapping protocol (see `WIPDocs/COMMAND_MAPPING_DESIGN.md`). Nothing SHADOW sends to the WCB may be a bare line (it gets broadcast to every board) or contain `^` or `;T`. The one exception is a raw command (up to 15 printable characters in a slot, stored with bit 7 of its first byte set): the owner typed it, so it goes out as typed (bare, or with `^` or `;T`), and it never appears unencoded in an `@SM` line (`!<hex>` on the wire, protocol v4, `Protocol::kMaxLine` 96). The one bare line is the `@WDP1` device announce, which WCB 6.2.1+ captures; comment out `SHADOW_WDP_ANNOUNCE` for older WCB firmware
 - **HCR Vocalizer**: `<...>` commands, routed through the WCB. Docs: https://docs.humancyborgrelations.com/astromech/platforms/embedded/commands
 - **MarcDuino / JawaLite**: legacy astromech command formats used by the dome boards
 

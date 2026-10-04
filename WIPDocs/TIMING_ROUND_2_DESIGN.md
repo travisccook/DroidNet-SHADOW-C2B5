@@ -69,6 +69,10 @@ so a request no longer delays the motors' pass at all.
   ports share one 64-byte read budget a pass (USB gets what the WCB left), so a pass never reads more than 64 bytes. If it
   handled a request, the pass ends there; otherwise it runs the background unit.
 
+> **Note, 2026-10-03 (raw commands):** the shared read budget was 64 bytes in round 2; it is 32 since raw commands
+> (`Runtime::kMaxBytesPerPass`), because the 93-character SLOT line of @SM v4 made the worst read pass 988.5 us, 11.5 us
+> under the limit. A long request takes one more pass to read. The UART's own RX buffer is still 64 bytes.
+
 A request counts as handled when `handleLine` ran on it, answered or not (a GET of a slot the busy EEPROM holds
 parses the whole line before it returns false). A request that can't be answered yet keeps `0a8b73f`'s rule: the
 bytes behind it are read and dropped so the RX buffer can't overflow.
@@ -79,6 +83,11 @@ faulted), so it builds and is tested on the host; `loop()` only calls it.
 **The background unit** is `0a8b73f`'s service work, unchanged inside: `Protocol::service()` (a DUMP line, a SUM step,
 a write's reply, a CTL event), then the announce, then the battery report. Each still waits for room in the TX queue
 as before. The EEPROM writer's step and the drain into Serial1 are not part of it: they run every pass.
+
+> **Note, 2026-10-03 (raw commands):** the writer's step ran every pass in round 2. Since raw commands, a pass that
+> handled a request puts off the writer's finishing step (`MapStore::finishDue()`, the verify that ends a write) to the
+> next pass; its other steps still run every pass. A full-budget request answered in the same pass as a finishing step
+> measured 1022.5/1036.5 us without this (the case existed in round 2, unmeasured).
 
 **Why nothing starves.** A background-only pass happens only right after a request pass, so requests get at least
 every other pass and the background unit always gets the pass after a request. Press passes can't come back to back
@@ -123,6 +132,11 @@ Two bugs, both in `0a8b73f`:
    repeat timer, plus any that waited; releasing a queue of waiting presses could fire several at once. A press
    past the third waits one pass in the FIFO, in order. Three presses with their PRESS lines measure 867-891 us
    (Part A), four 990.5 us.
+
+> **Note, 2026-10-03 (raw commands):** the limit was three in round 2; it is two since raw commands
+> (`Runtime::kMaxFiresPerPass`). A PRESS event is now checked against its own length, so more PRESS lines go out, and
+> three presses plus a write's last step had reached 1090.5 us. A third press waits one pass in the FIFO, as the
+> fourth did.
 
 A deferred press's PRESS event goes out when it fires, as today.
 
