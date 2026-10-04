@@ -93,7 +93,7 @@ as before. The EEPROM writer's step and the drain into Serial1 are not part of i
 every other pass and the background unit always gets the pass after a request. Press passes can't come back to back
 for long: presses fire on transitions and timers (the shared repeat is once a second).
 
-**What changes on the wire** (each documented by `tools/shadowmap/test_transcripts.py` against `0a8b73f`):
+**What changes on the wire** (each documented by `tools/shadowmap/test_transcripts.py` against `0a8b73f` in round 2; since 2026-10-03 it compares against `golden/v4`, with 10 categories listed in its docstring):
 
 - A request arriving in a press pass is handled one pass later (2-3 ms), so the press's command and PRESS event go
   out before its reply, and a SET in that pass takes effect after that press.
@@ -141,8 +141,8 @@ Two bugs, both in `0a8b73f`:
 A deferred press's PRESS event goes out when it fires, as today.
 
 **Decisions taken during implementation.** The hold is released at the start of `buttons()` and turned on as soon
-as a press is kept waiting or newly deferred. It covers presses waiting on the EEPROM or on the three-a-pass
-limit, not only presses waiting for room. A deferred press's PRESS event goes out when it fires.
+as a press is kept waiting or newly deferred. It covers presses waiting on the EEPROM or on the per-pass press
+limit (three in round 2, two since 2026-10-03), not only presses waiting for room. A deferred press's PRESS event goes out when it fires.
 
 ## 5. The EEPROM writer's step
 
@@ -152,13 +152,13 @@ write takes a few more passes when many bytes already match; what is written, ve
 
 ## 6. If presses alone are over 1 ms
 
-With at most three presses a pass (section 4), a press-only pass measured 891 us at worst under Part A. The timing
+With at most three presses a pass (section 4; round 2, two since 2026-10-03), a press-only pass measured 891 us at worst under Part A. The timing
 task measured it again with this design. If any press-only pass reaches 1 ms, PRESS event lines move out of the press pass: the pass records the event (slot, key,
 source, `from=`) and the background unit sends recorded events first, one per background pass, in order. The
 button commands themselves always go out in the pass they fire. If no press-only pass reaches 1 ms, this section
 is not built.
 
-**Outcome:** Task 6a was not needed. The worst press-only pass is 892.0 us (three presses + a write's last step).
+**Outcome:** Task 6a was not needed. The worst press-only pass is 892.0 us (three presses + a write's last step) (round 2; 914.5 us with two a pass since raw commands, see `COMMAND_MAPPING_DESIGN.md`, Timing and memory).
 
 ## 7. Motor safety
 
@@ -172,7 +172,7 @@ What protects the motors, and how each is checked:
 | The mapping never touches Serial2 or motor state | `lib/ShadowMap` has no Arduino dependency; `main.cpp` glue only | review |
 | Interrupts are off only briefly | `sm::Uart1`'s atomic blocks are a few instructions each; nothing new adds any | review |
 | No debug output stalls the loop | `SHADOW_VERBOSE` off (below) | the build; `config.h` |
-| RAM stays safe | static SRAM grows by at most 64 bytes over 1969 (the build with `SHADOW_VERBOSE` off), limit 2033; measured 2018 | the build's RAM line, recorded in the design doc |
+| RAM stays safe | static SRAM grows by at most 64 bytes over 1969 (the build with `SHADOW_VERBOSE` off), limit 2033; measured 2018 (round 2; 2028 since raw commands) | the build's RAM line, recorded in the design doc |
 
 **Found while checking: blocking debug output. Owner's decision (2026-10-02): turn `SHADOW_VERBOSE` off.** With it
 on (`include/config.h`), every press, ramp step and battery change adds a line to `output`, and `printOutput()` hands
@@ -190,8 +190,8 @@ events carry the same slot, key and source), or turn `SHADOW_VERBOSE` back on fo
 
 ## 8. Testing
 
-- Timing suites ("five presses in one pass" is superseded by the three-a-pass limit; the four-due figure, three
-  then one, covers it): `SM_TIMING_REPORT_ONLY` removed, so any figure at or over 1 ms fails. New figures: a press with each request kind arriving, two requests, the background unit
+- Timing suites ("five presses in one pass" is superseded by the per-pass press limit (three in round 2, two since 2026-10-03); the four-due figure (round 2: three
+  then one; now two then two), covers it): `SM_TIMING_REPORT_ONLY` removed, so any figure at or over 1 ms fails. New figures: a press with each request kind arriving, two requests, the background unit
   in the pass after a request, presses while commands wait for room.
 - `test_scheduler` (new): the rule's three cases; a press pass reads nothing; alternation under sustained requests
   (requests and background both progress); a DUMP and a stream of GETs both finish; the battery report goes out after
@@ -203,7 +203,7 @@ events carry the same slot, key and source), or turn `SHADOW_VERBOSE` back on fo
   verify and reply.
 - `SHADOW_VERBOSE` off: the firmware builds without warnings, and the HANDOFF_BUTTON_MAP bench step is updated.
 - Transcripts: every stream identical to `0a8b73f` except the differences listed in section 3, each named in
-  `test_transcripts.py`.
+  `test_transcripts.py` (round 2; since 2026-10-03 the goldens are `tools/shadowmap/golden/v4`).
 - All of: `pio run`, `pio test -e native`, `pio test -e simavr --without-uploading`,
   `python3 -m unittest tools/shadowmap/test_shadowmap.py tools/shadowmap/test_transcripts.py`.
   One `pio test` at a time per checkout.

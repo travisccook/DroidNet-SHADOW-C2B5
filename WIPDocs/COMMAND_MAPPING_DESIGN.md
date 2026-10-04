@@ -506,8 +506,9 @@ The library has no Arduino dependency, so it builds and tests on the host.
   **Waiting presses.** A press that can't go (EEPROM mid-write, no room in the TX queue, or already
   two fired this pass) waits in a FIFO of 8 and fires in order, at most 2 presses a pass
   (`kMaxFiresPerPass`, 3 until raw commands: a PRESS event is now checked against its own length, so
-  more PRESS lines go out, and three presses plus a write's last step had reached 1090.5 us); one older than 250 ms or whose controller has gone is dropped. While any
-  press waits, the TX queue is held for its command (the hold).
+  more PRESS lines go out, and three presses plus a write's last step had reached 1090.5 us); one
+  older than 250 ms or whose controller has gone is dropped. While any press waits, the TX queue is
+  held for its command (the hold).
 
   **Worst figures:**
 
@@ -589,7 +590,7 @@ python3 -m unittest tools/shadowmap/test_transcripts.py # what SHADOW sends, aga
   - the faster code against the code it replaced (`test_equiv_*`, `test_avr_crc_asm`,
     `test_avr_uart1`), and transcripts of scripted sessions against goldens in `tools/shadowmap/golden/v4`
     (`tools/shadowmap/test_transcripts.py`; recorded from `0a8b73f` with raw commands' Tasks 1-3
-    applied, 10 documented categories of difference, plus a raw session)
+    applied; its docstring lists the 10 documented categories of difference, and there is a raw session)
   - double taps (`test_double_tap`): exclusive firing, the window, holds, taps after a double
     tap, both controllers, drops and faults, events
   - long presses (`test_long_press`, 24 cases): the threshold, releases before and after it, with
