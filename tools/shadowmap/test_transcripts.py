@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""This tree's mapping code against the goldens recorded from 0a8b73f (tools/shadowmap/transcripts.py).
+"""This tree's mapping code against golden/v4 (tools/shadowmap/transcripts.py): goldens recorded from
+0a8b73f with the raw-commands plan's Tasks 1-3 applied verbatim (@SM v4: READY says v4, a raw-commands
+session). golden/v4 is golden/v3 (0a8b73f itself) with "v4" in every READY, plus the raw session, plus
+one change of its own: in shipped, the announce goes out one DUMP line earlier (kMaxLine 96 makes a
+DUMP line wait for more room). golden/v3 stays for reference; nothing compares with it now.
 
 Up to the Serial1 adapter every byte matched, "!!IDLE" clocks included. Timing round 2's pass
 rule (WIPDocs/TIMING_ROUND_2_DESIGN.md, section 3) moves the mapping's work after the motors and
@@ -15,8 +19,9 @@ is checked this way:
   differences are the documented ones (COINCIDE);
 - without the time-driven lines (battery reports and announces, which land wherever their time
   falls), a session with one thing at a time is the same sequence of lines as before;
-- a GET's round trip is at most two passes longer (unless a battery report or announce drains in
-  its window, see test_round_trips); a SUM's stays under 0.5 s.
+- a GET's round trip is at most two passes longer, plus the read passes category 8 adds to a GET
+  over 32 bytes (unless a battery report or announce drains in its window, see test_round_trips);
+  a SUM's stays under 0.5 s.
 
 The documented differences from 0a8b73f, each tied to the script line that causes it:
 
@@ -37,6 +42,23 @@ The documented differences from 0a8b73f, each tied to the script line that cause
 7. a second request already in the RX buffer waits one pass (design section 3), so a background
    line (here a DUMP line) can go before its reply (COINCIDE and COINCIDE_PACED).
 
+The raw-commands firmware (WIPDocs/RAW_COMMANDS_DESIGN.md) adds three, all timing only:
+
+8. a request reads at most Runtime::kMaxBytesPerPass = 32 bytes a pass, where golden/v4 read 64, so
+   a request over 32 bytes on the wire (its text and the WCB's "\r") takes more passes to read
+   (extra_read_passes). Every session but announce, battery and shipped has such requests. In the
+   unpaced runs each adds that many passes to its own script line's window (a request queued with
+   "!!QUEUE" adds them to the line it is read in: coincide.in's lines 8 and 10; none where something
+   longer sets that window: line 5's 700 ms hold and line 18's DUMP), and an announce or battery
+   report that comes due during those passes drains in a different script line's window (dump,
+   line 6; raw, lines 7 and 51; requests, lines 71 and 74). The paced runs read 2 bytes a pass, so
+   the budget never binds;
+9. a write's verify-and-finish step waits one pass after a pass that handled a request, so its OK
+   reply can come a pass later and an op request landing in between gets "ERR busy" (no session
+   here hits it: every stream and window is the same with or without the wait);
+10. a third press in one pass waits a pass (Runtime::kMaxFiresPerPass = 2), keeping its order in the
+   commands stream (no session here hits it either).
+
 Every session runs at once and paced at 2 bytes a pass.
 
     python3 -m unittest tools/shadowmap/test_transcripts.py      (from the repo root)
@@ -56,7 +78,9 @@ sys.path.insert(0, HERE)
 
 import transcripts as tx  # noqa: E402
 
-GOLDEN = os.path.join(HERE, "golden", "v3")
+GOLDEN = os.path.join(HERE, "golden", "v4")
+GOLDEN_READ_BUDGET = 64  # bytes a pass golden/v4's firmware read (0a8b73f's Runtime::kMaxBytesPerPass)
+READ_BUDGET = 32  # this tree's Runtime::kMaxBytesPerPass (category 8)
 ROUTE = ";W20,;S0"  # the coincide session's reply route (HELLO 20)
 STREAMS = ("replies", "events", "bat", "commands", "announces")
 
@@ -146,13 +170,23 @@ def idle_windows(text: str):
     return out
 
 
+def extra_read_passes(line: str, paced: int) -> int:
+    """Category 8: the passes a request takes to read beyond golden/v4's. Unpaced, a line of b bytes
+    on the wire (the script line and the WCB's "\r") takes ceil(b / budget) passes to read; paced at 2
+    bytes a pass, a budget of 32 is never reached."""
+    if paced:
+        return 0
+    b = len(line) + 1
+    return -(-b // READ_BUDGET) - -(-b // GOLDEN_READ_BUDGET)
+
+
 def timed_line_in(lines) -> bool:
     """True when a battery report or an announce (lines sent on a timer, not in reply) is among them."""
     return any(line.startswith("@WDP") or re.match(r"^(;W\d+,?)?;S0@SM BAT ", line) for line in lines)
 
 
 # The documented differences in the coincide session, not paced (the script lines are
-# tools/shadowmap/golden/v3/coincide.in's, from 1). Where a request lands in the pass a press fires:
+# tools/shadowmap/golden/v4/coincide.in's, from 1). Where a request lands in the pass a press fires:
 #   - a SET taken in during a press's pass used to be taken in before the press, which then sent
 #     the new key; the press now comes first and sends the slot's previous key, and the SET takes
 #     effect a pass later: line 7 (SET F NONE LEFT) meeting line 8 (press LEFT), and line 9
@@ -223,6 +257,8 @@ class TranscriptTest(unittest.TestCase):
     maxDiff = None
 
     def test_the_scripts_are_the_recorded_ones(self):
+        recorded = sorted(f[: -len(".in")] for f in os.listdir(GOLDEN) if f.endswith(".in"))
+        self.assertEqual(recorded, sorted(tx.SESSIONS))  # a session per golden, a golden per session
         for name, make in tx.SESSIONS.items():
             with open(os.path.join(GOLDEN, name + ".in"), encoding="latin-1", newline="\n") as f:
                 self.assertEqual(f.read(), "".join(line + "\n" for line in make()), name)
@@ -272,12 +308,14 @@ class TranscriptTest(unittest.TestCase):
                     # A GET whose window, in either run, also drains a battery report or an announce
                     # isn't timed: those go out on a timer, and the window measures their drain too.
                     # The GET's own reply time is unchanged there, but Task 2's cap of 4 EEPROM reads
-                    # a step makes earlier writes a few passes longer, so the periodic battery report
-                    # drains in a different script line's window (requests, line 73: +50 ms, line 74:
-                    # -50 ms). Every other GET keeps the two-pass limit.
+                    # a step and category 8's read passes make earlier lines a few passes longer, so
+                    # the periodic battery report drains in a different script line's window
+                    # (requests, line 71: +52 ms, line 74: -50 ms). Every other GET keeps the two-pass
+                    # limit, plus the passes category 8 adds to reading a GET over 32 bytes.
                     if line.startswith("@SM GET ") and not (timed_line_in(sent_a) or timed_line_in(sent_b)):
                         with self.subTest(session=tag, line=line):
-                            self.assertLessEqual(b - a, 2 * tx.PASS_MS)  # at most two passes longer
+                            limit = (2 + extra_read_passes(line, paced)) * tx.PASS_MS
+                            self.assertLessEqual(b - a, limit)
                     if line.startswith("@SM SUM *"):
                         with self.subTest(session=tag, line=line):
                             self.assertLess(b, 500)

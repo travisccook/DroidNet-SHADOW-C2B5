@@ -10,6 +10,7 @@ clock after each script line) plus the SHA-256 of the EEPROM image it leaves. Ev
 twice: with input there at once, and paced at 2 bytes a loop pass (about 9600 baud).
 
     python3 tools/shadowmap/transcripts.py --record golden/v3    record goldens from this tree
+    python3 tools/shadowmap/transcripts.py --record golden/v4 --root <tree>   ... from another tree
     python3 -m unittest tools/shadowmap/test_transcripts.py      compare this tree with them
 """
 
@@ -378,6 +379,70 @@ def s_shipped() -> List[str]:
     return lines
 
 
+RAW15 = ";W2;S4PLAY:3^;T"  # 15 characters, with the WCB's own '^' and ";T"
+
+
+def raw(text: str) -> str:
+    """A raw command as @SM v4 carries it."""
+    return "!" + hexs(text)
+
+
+def s_raw() -> List[str]:
+    """Raw commands (@SM v4): set, read back, DUMP and SUM, fired, refused, reverted, cut off."""
+    lines = [
+        req("@SM HELLO 20"),
+        req("@SM EVENTS 1"),
+        req("@SM PREFIX " + hexs(";W12,;Cabcd")),
+        req("@SM SUFFIX " + hexs("abcdefg")),
+        req("@SM SET D L1 L3 " + raw(RAW15)),  # with its 15-character default: the longest SLOT on the droid
+        req("@SM GET D L1 L3"),
+        req("@SM SET F CIRCLE RIGHTL " + raw(RAW15)),  # the longest PRESS: 81 with from=D
+        req("@SM GET F CIRCLE RIGHTL"),
+        req("@SM SET F NONE LEFT " + raw(" a b ")),
+        req("@SM SET F NONE UP2 " + raw("?SEQ,LIST")),
+        req("@SM SET F NONE UPL " + raw("held!")),
+        req("@SM SET F NONE DOWN !3b5732"),  # lower case in, upper case out
+        req("@SM SET F NONE RIGHT !2A"),
+        req("@SM SET D NONE UP !202D20"),
+        req("@SM GET F NONE DOWN"),
+        req("@SM GET F NONE RIGHT"),
+    ]
+    for bad in ("!", "!-", "!3", "!3G", "!00", "!1F", "!7F", "!C3A9", "!" + "41" * 16):
+        lines.append(req("@SM SET F NONE LEFT " + bad))
+    lines += [
+        req("@SM GET F NONE LEFT"),
+        press(LEFT, 0),
+        press(RIGHT, 0),
+        press(0, L1 | L3),
+        hold(40, UP),
+        tick(60),
+        hold(40, UP),
+        tick(1100),
+        hold(700, UP),
+        tick(1100),
+        hold(700, RIGHT, CIRCLE),  # F CIRCLE RIGHTL from=D
+        tick(1100),
+        req("@SM DUMP"),
+        req("@SM SUM"),
+        req("@SM REVERT D L1 L3"),
+        req("@SM GET D L1 L3"),
+        req("@SM SET F NONE LEFT scream"),
+        req("@SM GET F NONE LEFT"),
+        "!!CUT 6",
+        req("@SM SET F NONE LEFT " + raw(RAW15)),
+        "!!REBOOT",
+        req("@SM HELLO"),
+        req("@SM GET F NONE LEFT"),
+        req("@SM SET F NONE LEFT " + raw(RAW15)),
+        req("@SM SUM"),
+        req("@SM DEFAULTS"),
+        req("@SM GET F NONE UPL"),
+        req("@SM GET F NONE LEFT"),
+        req("@SM SUM"),
+    ]
+    return lines
+
+
 SESSIONS = {
     "requests": s_requests,
     "dump": s_dump,
@@ -387,11 +452,12 @@ SESSIONS = {
     "announce": s_announce,
     "coincide": s_coincide,
     "shipped": s_shipped,
+    "raw": s_raw,
 }
 
 # Sessions with no request queued to land during a press (the per-pass rule of the scheduler can
 # only reorder lines when two things happen in one pass).
-ONE_ACTIVITY = ("requests", "dump", "presses", "battery", "power", "announce", "shipped")
+ONE_ACTIVITY = ("requests", "dump", "presses", "battery", "power", "announce", "shipped", "raw")
 
 
 # --- running -------------------------------------------------------------------------------
