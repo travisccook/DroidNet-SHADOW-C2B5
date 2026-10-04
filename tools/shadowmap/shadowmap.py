@@ -587,9 +587,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--shadow-wcb", type=int, help="SHADOW's WCB number, if not the Pi's WCB")
     ap.add_argument("--pi-wcb", type=int, help="the Pi's WCB number (with --shadow-wcb)")
     ap.add_argument("command", choices=["hello", "get", "set", "revert", "dump", "sum", "defaults", "cfg", "battery", "watch"])
-    ap.add_argument("args", nargs="*")
+    ap.add_argument("args", nargs="*", help="slot words; for set, the value last (a raw value may start with -: -x, or after --)")
     ap.add_argument("--raw", action="store_true", help="set: the value is a raw command, sent exactly as typed")
-    a = ap.parse_args(argv)
+    a, extra = ap.parse_known_args(argv)
+    if extra:
+        # Raw text such as "-x" looks like an option: with `set --raw` it is the value, appended last.
+        if a.command == "set" and a.raw and len(a.args) == 3 and len(extra) == 1:
+            a.args.append(extra[0])
+        else:
+            ap.error("unrecognized arguments: " + " ".join(extra))
 
     if a.wcb:
         if not a.shadow_port:

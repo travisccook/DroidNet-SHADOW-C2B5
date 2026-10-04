@@ -385,6 +385,8 @@ bool Protocol::handleLine(const char *line, ReplyPort &port) {
         // A raw command travels as "!" and its bytes in hex, so its own ';', '^' or ";T" never
         // appear in a line the WCB carries. Anything that isn't 1-15 decodable bytes is "key";
         // decodeHex reads "-" as nothing, so "!-" is refused here.
+        // Order is not specified: bad hex answers ERR key before the slot is checked, but a decodable byte
+        // outside 0x20-0x7E on a reserved slot answers ERR reserved (beginSet checks reserved first).
         const char *arg = argv[4];
         const bool raw = arg[0] == '!';
         char text[kKeyBuf];

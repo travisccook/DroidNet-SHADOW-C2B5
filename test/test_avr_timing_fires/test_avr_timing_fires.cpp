@@ -156,21 +156,30 @@ WorstPass manyPresses(uint8_t fires, bool finishing) {
     TEST_ASSERT_TRUE(store.doubleTapMapped(kDomeCircleUp));
     TEST_ASSERT_TRUE(store.doubleTapMapped(kDomeCircleDown) != downFires);
 
-    gNow += 1100;
+    // With `finishing` (the worst figure), both controllers' battery levels also change in P: CRIT is
+    // first seen BatteryWatch::kFirstMs before P, so the settled level changes in P and not earlier.
+    const uint8_t batt = finishing ? 1 : 0;
+    if (finishing) {
+        loopPass(gNow += 2, kNone, kNone, batt, batt);
+        gNow += BatteryWatch::kFirstMs - Runtime::kLongPressMs;
+        TEST_ASSERT_TRUE(runtime.footBattery().level() != BattLevel::Crit);
+    } else {
+        gNow += 1100;
+    }
     const uint32_t a = gNow;
     const uint32_t p = a + Runtime::kLongPressMs;
     const uint32_t tap = p - 2 - Runtime::kDoubleTapMs;  // D CIRCLE RIGHT's window runs out at p - 2
-    loopPass(a, kFootRight, kDomeCircle);                 // F CIRCLE RIGHT starts waiting for its long press
+    loopPass(a, kFootRight, kDomeCircle, batt, batt);                 // F CIRCLE RIGHT starts waiting for its long press
     for (gNow = a + 2; gNow < p - 2; gNow += 2) {
         if (deferred && gNow == tap)
-            loopPass(gNow, kFootRight, kDomeCircleRight);  // the tap
+            loopPass(gNow, kFootRight, kDomeCircleRight, batt, batt);  // the tap
         else
-            loopPass(gNow, kFootRight, kDomeCircle);
+            loopPass(gNow, kFootRight, kDomeCircle, batt, batt);
         TEST_ASSERT_FALSE(gAny);
     }
     if (deferred)
         io.holdBusy(2);  // busy through the pass before P
-    loopPass(p - 2, kFootRight, kDomeCircleUpHeld);  // D CIRCLE RIGHT deferred; D CIRCLE UP waits
+    loopPass(p - 2, kFootRight, kDomeCircleUpHeld, batt, batt);  // D CIRCLE RIGHT deferred; D CIRCLE UP waits
     TEST_ASSERT_FALSE(gAny);
     if (finishing) {
         // A SET brought to its verify-and-finish step for P.
@@ -181,9 +190,13 @@ WorstPass manyPresses(uint8_t fires, bool finishing) {
         TEST_ASSERT_TRUE(store.finishDue());
     }
     WorstPass w;
-    loopPass(p, kFootRight, kDomeCircleDownHeld);
+    loopPass(p, kFootRight, kDomeCircleDownHeld, batt, batt);
     TEST_ASSERT_TRUE(gAny);
     TEST_ASSERT_TRUE(gFinishing == finishing);
+    if (finishing) {
+        TEST_ASSERT_TRUE(runtime.footBattery().level() == BattLevel::Crit);  // the change landed in P
+        TEST_ASSERT_TRUE(runtime.domeBattery().level() == BattLevel::Crit);
+    }
     TEST_ASSERT_FALSE(store.finishDue());
     w.add(gLast);
     if (fires > Runtime::kMaxFiresPerPass) {
@@ -192,7 +205,7 @@ WorstPass manyPresses(uint8_t fires, bool finishing) {
         TEST_ASSERT_TRUE(rest <= Runtime::kMaxFiresPerPass);
         TEST_ASSERT_EQUAL_UINT8(Runtime::kMaxFiresPerPass, runtime.firesLastPass());
         TEST_ASSERT_EQUAL_UINT8(rest, runtime.deferredCount());
-        loopPass(p + 2, kFootRight, kDomeCircleDownHeld);
+        loopPass(p + 2, kFootRight, kDomeCircleDownHeld, batt, batt);
         TEST_ASSERT_TRUE(gAny);
         TEST_ASSERT_EQUAL_UINT8(rest, runtime.firesLastPass());
         TEST_ASSERT_EQUAL_UINT8(0, runtime.deferredCount());

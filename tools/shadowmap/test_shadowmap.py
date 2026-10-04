@@ -389,6 +389,19 @@ class ContractTest(unittest.TestCase):
         self.wcb.tick(6000)  # the first 0.5-3 s after boot, the next 25-30 s after that
         self.assertEqual(['@WDP1 {"type":"Shadow","fw":"sim"}'], self.wcb.announces)
 
+    def test_cli_set_raw_text_starting_with_a_dash(self):
+        # "set --raw F NONE LEFT -x" and "... -- -x" both set the raw text "-x" (not an option).
+        from unittest import mock
+        for tail in (["-x"], ["--", "-x"]):
+            real = smc.Client
+            with mock.patch.object(smc, "SerialTransport", return_value=self.wcb), \
+                    mock.patch.object(smc, "Client",
+                                      lambda t, route=None: real(t, route, timeout=0.05, retries=3)):
+                rc = smc.main(["--wcb", "x", "--shadow-port", "3", "set", "--raw", "F", "NONE", "LEFT"] + tail)
+            self.assertEqual(0, rc)
+            s = self.client.get(self.slot("F NONE LEFT"))
+            self.assertEqual(("-x", True), (s.key, s.raw))
+
     RAW = ";W2;S4PLAY:3^;T"
 
     def test_raw_command_round_trip_press_and_sum(self):

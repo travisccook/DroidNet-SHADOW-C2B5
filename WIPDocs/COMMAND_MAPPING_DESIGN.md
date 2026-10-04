@@ -514,7 +514,7 @@ The library has no Arduino dependency, so it builds and tests on the host.
 
   | us | Pass |
   |---:|---|
-  | 914.5 | three presses due + a write's last step: two fire, one waits (the worst press-only pass) |
+  | 921.5 | three presses due + a write's last step: two fire, one waits (the worst press-only pass) |
   | 906.5 | full 32-byte budget ending a raw GET, the 93-character SLOT answered, + battery change + drain (the worst read pass) |
   | 904.0 | the same GET answered as a raw SET's (or DEFAULTS') finishing step comes due |
   | 901.0 | GET pass: raw command on F CIRCLE RIGHTL, 93-character SLOT line |
@@ -528,7 +528,7 @@ The library has no Arduino dependency, so it builds and tests on the host.
 
   Before round 2 (Part A, `52df1b9`): 5 of 126 figures at or over 1 ms, worst 1.115 ms; at `0a8b73f`, 61.
 
-  - The worst whole pass is the three-press pass with a write's last step, 914.5 us, 85.5 us under the
+  - The worst whole pass is the three-press pass with a write's last step, 921.5 us, 78.5 us under the
     limit; the worst read pass is 906.5 us. Round 2's 944.5 us read pass became 906.5 us with the
     32-byte budget and the longer v4 lines (`kMaxLine` 96).
   - While a WCB request can't be answered yet, the USB port isn't read. The request waits for room in

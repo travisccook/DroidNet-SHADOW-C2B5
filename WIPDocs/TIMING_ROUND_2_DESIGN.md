@@ -66,7 +66,7 @@ so a request no longer delays the motors' pass at all.
 - **The first pass without a press after one that handled a request** runs the background unit and reads no
   request bytes (a press pass in between doesn't cancel the background unit it is owed).
 - **Any other pass** pumps the ports (WCB first, then USB) until one request is handled or the bytes run out. Both
-  ports share one 64-byte read budget a pass (USB gets what the WCB left), so a pass never reads more than 64 bytes. If it
+  ports share one 64-byte read budget a pass (USB gets what the WCB left), so a pass never reads more than 64 bytes (round 2; 32 since 2026-10-03). If it
   handled a request, the pass ends there; otherwise it runs the background unit.
 
 > **Note, 2026-10-03 (raw commands):** the shared read budget was 64 bytes in round 2; it is 32 since raw commands
@@ -158,7 +158,7 @@ source, `from=`) and the background unit sends recorded events first, one per ba
 button commands themselves always go out in the pass they fire. If no press-only pass reaches 1 ms, this section
 is not built.
 
-**Outcome:** Task 6a was not needed. The worst press-only pass is 892.0 us (three presses + a write's last step) (round 2; 914.5 us with two a pass since raw commands, see `COMMAND_MAPPING_DESIGN.md`, Timing and memory).
+**Outcome:** Task 6a was not needed. The worst press-only pass is 892.0 us (three presses + a write's last step) (round 2; 921.5 us with two a pass since raw commands, see `COMMAND_MAPPING_DESIGN.md`, Timing and memory).
 
 ## 7. Motor safety
 
