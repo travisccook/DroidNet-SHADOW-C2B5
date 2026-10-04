@@ -9,7 +9,7 @@ golden is shadow_sim's stdout for it (every line SHADOW writes to Serial1, and t
 clock after each script line) plus the SHA-256 of the EEPROM image it leaves. Every session runs
 twice: with input there at once, and paced at 2 bytes a loop pass (about 9600 baud).
 
-    python3 tools/shadowmap/transcripts.py --record golden/v3    record goldens from this tree
+    python3 tools/shadowmap/transcripts.py --record golden/v4    record goldens from this tree
     python3 tools/shadowmap/transcripts.py --record golden/v4 --root <tree>   ... from another tree
     python3 -m unittest tools/shadowmap/test_transcripts.py      compare this tree with them
 """
@@ -509,7 +509,7 @@ def record(sim: str, golden_dir: str) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--record", metavar="DIR", help="golden directory under tools/shadowmap/, e.g. golden/v3")
+    ap.add_argument("--record", metavar="DIR", help="golden directory under tools/shadowmap/, e.g. golden/v4")
     ap.add_argument("--root", default=ROOT, help="the firmware tree to build shadow_sim from")
     a = ap.parse_args()
     if not a.record:

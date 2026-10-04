@@ -526,8 +526,8 @@ class FramingTest(unittest.TestCase):
         self.assertEqual((";W2", True), smc.parse_value("!3b5732"))
         self.assertEqual(("", False), smc.parse_value("-"))
         self.assertEqual(("scream", False), smc.parse_value("scream"))
-        for bad in ("!", "!-", "!3", "!0A", "!C3A9"):
-            with self.assertRaises(smc.ProtocolError):
+        for bad in ("!", "!-", "!3", "!0A", "!C3A9", "!41\t42", "!41 42", "!4142\n", "! 4142"):
+            with self.assertRaises(smc.ProtocolError, msg=repr(bad)):
                 smc.parse_value(bad)
         self.assertTrue(smc.valid_raw(" ") and smc.valid_raw("~" * 15))
         self.assertFalse(smc.valid_raw("ab\n") or smc.valid_raw("") or smc.valid_raw("x" * 16))

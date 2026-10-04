@@ -303,6 +303,7 @@ class TranscriptTest(unittest.TestCase):
             for paced in (0, tx.PACED):
                 tag = name + (".paced" if paced else "")
                 before, after = idle_windows(golden(tag)), idle_windows(run(name, paced)[0])
+                self.assertEqual(len(script), len(before), tag)  # zip would drop lines silently
                 self.assertEqual(len(script), len(after), tag)
                 for line, (a, sent_a), (b, sent_b) in zip(script, before, after):
                     # A GET whose window, in either run, also drains a battery report or an announce

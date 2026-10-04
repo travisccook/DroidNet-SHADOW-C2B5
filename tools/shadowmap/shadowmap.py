@@ -77,6 +77,8 @@ def parse_value(token: str) -> Tuple[str, bool]:
     if token == "-":
         return "", False
     if token.startswith("!"):
+        if not re.fullmatch(r"[0-9A-Fa-f]*", token[1:]):  # bytes.fromhex would skip whitespace
+            raise ProtocolError("parse", token)
         try:
             text = bytes.fromhex(token[1:]).decode("ascii")
         except ValueError:  # odd length, a bad digit, or a byte over 0x7F
