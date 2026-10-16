@@ -52,21 +52,21 @@
 //
 //         -Travis, 2025-06-02
 //
-//         Update, October 2026: That quest to make button mappings simple sort of
-//         finished itself. This is now DroidNet's port of SHADOW, and I don't change
-//         mappings in code anymore. Every combo (single press, double tap or long press)
-//         sends a WCB stored command, and I remap them from DroidNet on my phone while
-//         C2-B5 is running: no laptop, no reflashing, and the controllers stay connected.
-//         SHADOW announces itself so DroidNet can find it, and it reports the nav
-//         controllers' batteries so a dead one doesn't surprise me mid-event. None of it
-//         is allowed to slow down the loop that drives the droid. Serial commands still
-//         rule the world; they just get picked from a phone now. The flip side is that
-//         this is even less of a drop-in than before. It does one job with one set of
-//         parts (a Mega ADK, Move Navs, a Sabertooth, a SyRen and a WCB), so if yours
-//         differ, plan on editing code. Without DroidNet and a WCB it won't do you much
-//         good, but if you're running them I hope it saves you as many hours as it has
-//         saved me. Same deal as always: no warranty, just sharing as so many have
-//         shared with me.
+//         Update, October 2026: That quest to make button mappings simple sort of evolved
+//         out of control once DroidNet came into the picture - I could not stand to not
+//         have the buttons configurable via that interface! We have combos, and every combo
+//         (single press, double tap or long press) sends a WCB stored command, and they can
+//         be live remapped via DroidNet: any device, no reflashing, and the controllers
+//         stay connected. SHADOW announces itself so DroidNet can find it, and it reports
+//         the nav controllers' batteries so a dead one doesn't surprise me mid-event. None
+//         of it is allowed to slow down the loop that drives the droid. Serial commands
+//         still rule the world; but I am running EVERYTHING via a WCB stored command now.
+//         The flip side is that this is even less of a drop-in than before. It does one job
+//         with one set of parts (a Mega ADK, Move Navs, a Sabertooth, a SyRen and a WCB),
+//         so if yours differ, you'll need to fork it and see about adding what you need.
+//         Without DroidNet and a WCB it won't do you much good, but if you're running them
+//         I hope it saves you as many hours as it has saved me. Same deal as always: no
+//         warranty, just sharing as so many have shared with me.
 //
 //         -Travis, 2026-10-16
 //
