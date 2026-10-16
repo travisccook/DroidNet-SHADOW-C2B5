@@ -85,6 +85,16 @@ class Protocol {
     // Controller connection state, for READY and (with EVENTS on) "@SM CTL" events.
     void setPads(bool footConnected, bool domeConnected);
 
+    // The USB port. "@SM REFUSED" goes there without EVENTS: it's where the owner looks for it
+    // (DroidNet's Serial tab). Call once from setup().
+    void setConsole(ReplyPort &port) { console_ = &port; }
+
+    // A paired controller whose address isn't allowed tried to connect as `role`. `bdaddr` is
+    // least significant byte first (Btd.disc_bdaddr). service() sends "@SM REFUSED <F|D> <address>"
+    // to the console and to the event port when that's another port, each when it has room. A
+    // newer refusal replaces one not yet sent.
+    void noteRefused(Ctrl role, const uint8_t bdaddr[kMacLen]);
+
     // The controllers' battery levels, for "@SM BAT" (a BAT request, or sendBattery()).
     void setBattery(const BatteryReport &report) { battery_ = report; }
 
@@ -100,7 +110,8 @@ class Protocol {
     bool sendSlotLine(uint8_t slot, ReplyPort &port);
     bool handleMac(uint8_t argc, char *const *argv, ReplyPort &port);
     void sendMacLine(uint8_t index, ReplyPort &port);  // "@SM MAC <S> <address|-> <eeprom|default>"
-    void servicePads();
+    bool servicePads();     // whether it sent a line
+    bool serviceRefused();  // the same
     void sendOpReply(bool ok);
     void startOp(Op op, ReplyPort &port, MapStore::Result r, const char *verb, uint8_t slot);
 
@@ -124,6 +135,12 @@ class Protocol {
     uint8_t pads_ = 0;          // bit 0 foot, bit 1 dome
     uint8_t padsReported_ = 0;  // what the event port last heard
     BatteryReport battery_ = {};
+
+    ReplyPort *console_ = nullptr;
+    uint8_t refusedMac_[kMacLen] = {};  // most significant byte first
+    char refusedRole_ = 'F';
+    bool refusedToConsole_ = false;
+    bool refusedToEvents_ = false;
 };
 
 }  // namespace sm

@@ -543,7 +543,9 @@ void Protocol::sendMacLine(uint8_t index, ReplyPort &port) {
 }
 
 void Protocol::service() {
-    servicePads();
+    // One event line a call: a CTL first, else a REFUSED.
+    if (!servicePads())
+        serviceRefused();
     if (op_ == Op::None || opPort_ == nullptr)
         return;
 
@@ -742,15 +744,48 @@ void Protocol::setPads(bool footConnected, bool domeConnected) {
 }
 
 // With EVENTS on, one "@SM CTL <F|D> <0|1>" per controller that connected or dropped.
-void Protocol::servicePads() {
+bool Protocol::servicePads() {
     if (eventPort_ == nullptr || pads_ == padsReported_ || !eventPort_->canSend(kMaxLine))
-        return;
+        return false;
     const uint8_t changed = static_cast<uint8_t>(pads_ ^ padsReported_);
     const uint8_t bit = (changed & 1) ? 1 : 2;
     Out out;
     out.p(PSTR("@SM CTL ")).c(bit == 1 ? 'F' : 'D').c(' ').c((pads_ & bit) ? '1' : '0');
     emit(out, *eventPort_);
     padsReported_ = static_cast<uint8_t>(padsReported_ ^ bit);
+    return true;
+}
+
+void Protocol::noteRefused(Ctrl role, const uint8_t bdaddr[kMacLen]) {
+    for (uint8_t i = 0; i < kMacLen; ++i)
+        refusedMac_[i] = bdaddr[kMacLen - 1 - i];
+    refusedRole_ = role == Ctrl::F ? 'F' : 'D';
+    refusedToConsole_ = console_ != nullptr;
+    refusedToEvents_ = true;  // checked against the event port when it's sent
+}
+
+// "@SM REFUSED <F|D> <address>": to the console first, then (on a later call) to the event port
+// if that's another port. Each waits for room; a newer refusal replaces both.
+bool Protocol::serviceRefused() {
+    if (refusedToEvents_ && (eventPort_ == nullptr || eventPort_ == console_))
+        refusedToEvents_ = false;  // nobody else asked for events
+    ReplyPort *to = nullptr;
+    if (refusedToConsole_ && console_->canSend(kMaxLine))
+        to = console_;
+    else if (!refusedToConsole_ && refusedToEvents_ && eventPort_->canSend(kMaxLine))
+        to = eventPort_;
+    if (to == nullptr)
+        return false;
+    char text[kMacTextBuf];
+    formatMac(refusedMac_, text);
+    Out out;
+    out.p(PSTR("@SM REFUSED ")).c(refusedRole_).c(' ').s(text);
+    emit(out, *to);
+    if (to == console_)
+        refusedToConsole_ = false;
+    else
+        refusedToEvents_ = false;
+    return true;
 }
 
 }  // namespace sm
