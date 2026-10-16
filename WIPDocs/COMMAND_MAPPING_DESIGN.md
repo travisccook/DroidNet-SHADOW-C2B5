@@ -230,7 +230,8 @@ as firing Front Holo Center. Over-speed now only listens to the foot controller.
 
 ## EEPROM layout
 
-The layout uses 3952 of the 4096 bytes. Nothing else uses EEPROM.
+The mapping uses 3952 of the 4096 bytes; the controller addresses take the next 36 (see
+`WIPDocs/CONTROLLER_ADDRESSES_DESIGN.md`). Nothing else uses EEPROM.
 
 ```
 0x000  header A  32 B   magic "SM", layout version, slot count, sequence, generation,
@@ -239,7 +240,8 @@ The layout uses 3952 of the 4096 bytes. Nothing else uses EEPROM.
                         CRC16 over (layout version, generation, slot index, key)
 0x550  72 slots x 18 B  double taps (slot index 72-143), the same records
 0xA60  72 slots x 18 B  long presses (slot index 144-215), the same records
-0xF70  free
+0xF70  4 x 9 B          controller addresses F, D, F2, D2: state, address, CRC16
+0xF94  free
 ```
 
 - **Double taps came later, without a new layout.** The header still says layout version 1 and
@@ -276,6 +278,9 @@ The layout uses 3952 of the 4096 bytes. Nothing else uses EEPROM.
 
 ## Protocol reference (v4)
 
+`MAC` and `REFUSED` came later without a version change: a client tells firmware without them by
+`ERR verb` to `MAC`.
+
 v2 added the double-tap slots: `slots=144`, 144 lines in a DUMP, and button tokens like `UP2`.
 v3 adds the long-press slots: `slots=216`, 216 lines in a DUMP, and `UPL` tokens. Nothing else
 changed. v4 adds raw commands: wherever a slot's command appears (`OK SET`, `SLOT` in GET and DUMP,
@@ -306,8 +311,9 @@ digits. SHADOW accepts upper or lower case and sends upper case.
 - **Terminators:** lines end in `\r` or `\n`.
 - **Tokens:** separated by single spaces.
 - **Slots:** written as `<C> <M> <B>`, e.g. `F L1 UP`, `F L1 UP2` for its double tap, or `F L1 UPL` for its long press.
-- **One write-type operation at a time.** SET, REVERT, DEFAULTS, PREFIX, SUFFIX, DUMP and SUM are
-  refused with `ERR busy` while another one runs. HELLO, CFG, GET, EVENTS and BAT are always answered.
+- **One write-type operation at a time.** SET, REVERT, DEFAULTS, PREFIX, SUFFIX, DUMP, SUM and MAC (its
+  list and its changes) are refused with `ERR busy` while another one runs. HELLO, CFG, GET, EVENTS, BAT
+  and `MAC <S>` are always answered.
 
 ### Requests
 
@@ -325,6 +331,9 @@ digits. SHADOW accepts upper or lower case and sends upper case.
 | `SUFFIX <hex\|->` | `OK SUFFIX <hex\|->`. At most 7 printable characters, no `^`, no `;T`/`;t`. |
 | `EVENTS <0\|1>` | `OK EVENTS <0\|1>`. With 1, this port gets the events below. |
 | `BAT` | `BAT F=<lvl> D=<lvl> fs=<st> ds=<st> up=<s> hb=<s>`: the controllers' battery levels (see [Battery reports](#battery-reports)). |
+| `MAC` | Four lines, F, D, F2, D2, one a pass: `MAC <S> <address\|-> <eeprom\|default>`. Refused with `ERR busy` while another operation runs, like DUMP. |
+| `MAC <S>` | `MAC <S> <address\|-> <eeprom\|default>`. Always answered, like GET. `S` is `F`, `D`, `F2` or `D2`. |
+| `MAC <S> <address\|-\|default>` | `OK MAC <S> <ADDRESS\|-\|default>` once written and verified: an address (`HH:HH:HH:HH:HH:HH`, either case; echoed upper case), `-` for no controller, `default` for the build's. A write: one at a time with SET and the others. |
 
 ### Events
 
@@ -334,6 +343,7 @@ These are only sent with `EVENTS 1`, and are dropped rather than queued if the l
 | --- | --- |
 | `PRESS <slot> <key\|!hex\|-> <src> [from=<F\|D>] [res=<reason>]` | Any combo that reaches the mapping, mapped or not, when it fires: a double tap as `UP2`, a long press as `UPL` when it fires, a combo that waited for a second tap when its window closes. `from=` means the modifier was held on that other controller. |
 | `CTL <F\|D> <0\|1>` | A controller connected or dropped |
+| `REFUSED <F\|D> <address>` | A paired controller that isn't allowed tried to connect, as the foot or the dome. Also sent to the USB port without EVENTS. |
 
 ### Battery reports
 
@@ -403,6 +413,7 @@ The format is `ERR <code> [<VERB> [<slot>]]`.
 | `key` | Not `[A-Za-z0-9_]{1,15}`, `-`, or `!` and the hex of 1-15 bytes 0x20-0x7E (odd length, a bad digit, `!`, `!-`, a NUL, 16 or more bytes) |
 | `prefix` / `suffix` | The value breaks the rules above |
 | `eeprom` | The write didn't verify after one retry |
+| `addr` | Not a usable address (`HH:HH:HH:HH:HH:HH`, not all 0 or all FF) |
 
 ### Client rules
 

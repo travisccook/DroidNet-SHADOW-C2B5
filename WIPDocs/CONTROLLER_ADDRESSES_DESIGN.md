@@ -55,8 +55,8 @@ New event:
 | `REFUSED <F\|D> <address>` | A paired controller whose address isn't allowed for that role tried to connect. `F` or `D` is the role SHADOW checked it for: which of the two PS3BT instances (`PS3NavFoot`, `PS3NavDome`) took the connection. |
 
 `REFUSED` goes to the USB port every time, without `EVENTS 1`, because that is where the owner looks
-for it; if the USB port has no room for the line, it waits there for a later pass. On the WCB port it is an ordinary event: sent only to the port that sent `EVENTS 1`, dropped
-rather than queued when there's no room, never while a press waits. DroidNet's `parse_event()`
+for it; if the USB port has no room for the line, it waits there for a later pass. On the WCB port it is an ordinary event: sent only to the port that sent `EVENTS 1`, and like `CTL`
+it waits for room (never while a press waits); a newer refusal replaces it. DroidNet's `parse_event()`
 returns `None` for event words it doesn't know, so today's DroidNet ignores it. If two refusals come
 before the first is sent, the newest wins.
 
@@ -95,12 +95,13 @@ order F, D, F2, D2, ending at `0xF94`:
 
 ## The connect check
 
-- A small `ControllerList` in `lib/ShadowMap` (no Arduino dependency, so it tests on the host) holds
-  the effective address of each slot: the EEPROM record when it's set, else the build's address.
-  `allows(role, bdaddr)` compares raw bytes with `Btd.disc_bdaddr` (least significant byte first):
+- `MapStore` (in `lib/ShadowMap`, no Arduino dependency, so it tests on the host) holds, through
+  `setBuiltInMac()`, `macFor()` and `macAllows()`, the effective address of each slot: the EEPROM
+  record when it's set, else the build's address. `macAllows(role, bdaddr)` compares raw bytes with `Btd.disc_bdaddr` (least significant byte first):
   the foot role accepts F or F2, the dome role D or D2, as today. An empty slot matches nothing.
 - The build's addresses come from `include/controller_macs.h`, parsed once at boot by
-  `parseBtAddress()` (beside `formatBtAddress()` in `include/bt_address.h`). The template's
+  `sm::parseMac()` (`lib/ShadowMap/src/sm_mac.h`; the protocol uses it too, and the library can't
+  include the project's `include/`). The template's
   `XX:XX:XX:XX:XX:XX` doesn't parse, so it means no address.
 - `controller_macs.h` becomes optional: `config.cpp` includes it when it exists
   (`__has_include`), and otherwise uses no built-in addresses. A build without it accepts no
@@ -147,11 +148,11 @@ Every mapping pass stays under 1 ms on the emulated Mega, and the timing suites 
 
 Test-first, on the host (`native`) and the emulated Mega (`simavr`):
 
-- `parseBtAddress()`: valid forms, either case, wrong lengths and separators, bad digits, all-zero
+- `sm::parseMac()`: valid forms, either case, wrong lengths and separators, bad digits, all-zero
   and all-`FF`.
 - Records: write, read back, CRC failure, erased, unknown state, power cut mid-write (a torn record
   reads as not set), `default` erasing, `DEFAULTS` leaving them alone, survives `begin()`.
-- `ControllerList`: precedence (EEPROM over build, `-` blocking a built-in address), role matching
+- `MapStore::macFor()` / `macAllows()`: precedence (EEPROM over build, `-` blocking a built-in address), role matching
   (F/F2 for foot, D/D2 for dome), byte order against `disc_bdaddr`, empty slots matching nothing.
 - Protocol: each `MAC` form and its reply, `ERR args`, `ERR addr`, `ERR busy`, CRC rules per port,
   `REFUSED` on USB without `EVENTS`, on WCB only with `EVENTS 1`, newest refusal wins.

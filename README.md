@@ -33,7 +33,7 @@ The link line at the top shows DroidNet reaching SHADOW through the WCB. Below i
 - **Keeps the map in EEPROM.** DroidNet reads and changes it over the WCB link (SHADOW's `@SM` protocol). The built-in defaults are in [`src/default_mappings.cpp`](src/default_mappings.cpp).
 - **Announces itself** to the WCB every 25-30 seconds, so DroidNet can find it.
 - **Reports controller batteries** (OK, LOW or CRIT) to DroidNet.
-- **Stops the motors** when a controller drops or sends bad data, and accepts only the controllers whose Bluetooth addresses you list.
+- **Stops the motors** when a controller drops or sends bad data, and accepts only the controllers you've allowed (from DroidNet's Serial tab, or built in).
 
 ## What you need
 
@@ -45,7 +45,7 @@ This is the only hardware the firmware supports. Anything different, such as ano
 - **Motor drivers:** a [Sabertooth 2x32](https://www.dimensionengineering.com/products/sabertooth2x32) or 2x25 for the feet and a [SyRen 10](https://www.dimensionengineering.com/products/syren10) for the dome, both in packetized serial.
 - **A WCB** running firmware 6.2.1 or later (for the device announce), plugged into the Signal Booster by USB.
 - **DroidNet Signal Booster** with the SHADOW tab. Use the newest release: double taps, long presses and raw commands each need a recent one.
-- **[PlatformIO](https://platformio.org/platformio-ide)** to build and upload: VS Code with the PlatformIO extension, or the `pio` command line. This is not an Arduino IDE sketch.
+- **[PlatformIO](https://platformio.org/platformio-ide)**, only if you build the firmware yourself: VS Code with the PlatformIO extension, or the `pio` command line. This is not an Arduino IDE sketch. To flash a release, DroidNet is all you need.
 
 ## Wiring
 
@@ -94,21 +94,16 @@ Check your driver's manual before you power up: on a Sabertooth 2x32, switch 3 a
 
 ## Turn it on
 
-### 1. Build and upload with your controllers' addresses
+### 1. Put the firmware on SHADOW
 
-1. Clone this repository and open it in VS Code with PlatformIO (or use `pio` from the repository root).
-2. Create your local controller list (it's gitignored, so your addresses never land in a repository):
+**With DroidNet (no tools on your computer):**
 
-   ```bash
-   cp include/controller_macs.example.h include/controller_macs.h
-   ```
+1. Download `SHADOWC2B5_<commit>.hex` from the newest [release](https://github.com/travisccook/DroidNet-SHADOW-C2B5/releases).
+2. Turn off the motor power (or E-stop it) and put the drive wheels up: flashing resets the Mega.
+3. Plug SHADOW's USB (the Mega's USB-B port) into the Signal Booster.
+4. In DroidNet's **Firmware** tab, pick the Mega as the device, choose the `.hex`, set Board Type to **Arduino Mega**, and click **Flash Firmware**. Don't use Auto-detect: it probes other serial ports on the Booster. DroidNet keeps SHADOW's EEPROM, so a button map and controller list already there survive.
 
-3. For the first setup, uncomment `#define SHADOW_DEBUG` in `include/config.h`, then build, upload and open the console:
-
-   ```bash
-   pio run -t upload
-   pio device monitor --baud 115200
-   ```
+**Or build it yourself** with PlatformIO (VS Code, or `pio` from the repository root): `pio run -t upload`. To build your controllers' addresses in, copy `include/controller_macs.example.h` to `include/controller_macs.h` and fill it in; without it, you allow them in step 3 like everyone else.
 
 ### 2. Pair each controller with the dongle
 
@@ -116,17 +111,26 @@ SHADOW pairs controllers the way SHADOW always has, through the USB Host Shield 
 
 1. With the dongle in the Mega's USB host port, power up or reset the Mega and wait a few seconds. The library reads the dongle's address.
 2. **Without resetting the Mega**, unplug the dongle and plug the Navigation controller into the same port with a USB cable. Wait until its light flashes: the library has written the dongle's address into the controller.
-3. Unplug the controller, plug the dongle back in, and press PS on the controller.
+3. Unplug the controller and plug the dongle back in.
 
-### 3. Tell SHADOW which controllers are yours
+### 3. Allow your controllers
 
-SHADOW drops any controller it doesn't know and stops the motors. With `SHADOW_DEBUG` on, it first prints the controller's address:
+SHADOW drops any controller it doesn't know and stops the motors. To allow one:
 
-```
-BT Address of Last connected Device when FOOT PS3 Connected: 00:11:22:33:44:55
-```
+1. In DroidNet's **Serial** tab, pick SHADOW's USB port (the Mega), set 115200 baud and click **Connect**. Connecting resets SHADOW; that's expected.
+2. Press PS on the foot controller. SHADOW refuses it and shows its address:
+   ```
+   @SM REFUSED F 00:1A:2B:3C:4D:05 *…
+   ```
+3. Type the same address into an `@SM MAC` command and press Enter:
+   ```
+   @SM MAC F 00:1A:2B:3C:4D:05
+   ```
+   SHADOW answers `@SM OK MAC F 00:1A:2B:3C:4D:05`.
+4. Press PS again: the controller connects and its light stays on.
+5. Then the dome controller, the same way with `D`. **Connect the foot controller first:** SHADOW gives the first controller that connects the foot's place, so a dome controller connecting first is refused as `F`.
 
-Connect one controller at a time, with no other controller on. Copy each address into `include/controller_macs.h` exactly as SHADOW prints it (uppercase, two digits a byte): `PS3_FOOT_MAC`, and optionally `PS3_DOME_MAC` and the two backups. Then comment `SHADOW_DEBUG` out again and upload once more.
+The slots are `F` (foot), `D` (dome), `F2` and `D2` (a backup for each). `@SM MAC` lists all four, `@SM MAC D2 -` empties a slot, and `@SM MAC F default` goes back to the address built into the firmware (none in the release). Taking away the address of a controller that's connected drops it at once and stops the motors. The list lives in SHADOW's EEPROM: it survives reboots and reflashing. The same commands work through the WCB with the protocol's checksum (see `WIPDocs/COMMAND_MAPPING_DESIGN.md`).
 
 ### 4. First drive
 
@@ -159,7 +163,7 @@ Every other combo is yours to map in DroidNet.
 
 ## Safety
 
-- The motors stop when a controller disconnects or its data goes bad, and when a controller that isn't in `controller_macs.h` tries to connect.
+- The motors stop when a controller disconnects or its data goes bad, when a controller you haven't allowed tries to connect, and when you take away the address of one that's connected.
 - PS + ✕ turns the drive stick off.
 - Nothing in the button mapping may block the main loop: every pass of the mapping work stays under 1 ms on an emulated Mega, and the tests fail if it doesn't.
 - Leave `SHADOW_VERBOSE` off on the droid. Its console output blocks the loop for milliseconds at a time.
