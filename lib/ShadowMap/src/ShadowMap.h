@@ -6,6 +6,7 @@
 #include "sm_crc.h"
 #include "sm_eeprom.h"
 #include "sm_line.h"
+#include "sm_mac.h"
 #include "sm_out.h"
 #include "sm_protocol.h"
 #include "sm_resolve.h"
