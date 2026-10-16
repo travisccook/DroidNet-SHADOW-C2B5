@@ -307,7 +307,7 @@ class PacedEeprom final : public EepromIo {
 // --- EEPROM contents ---------------------------------------------------------------------------
 
 inline void eeErase() {
-    for (uint16_t a = 0; a < MapStore::kFootprint; ++a)
+    for (uint16_t a = 0; a < MapStore::kEepromUsed; ++a)
         eeprom_update_byte(reinterpret_cast<uint8_t *>(a), 0xFF);
     eeprom_busy_wait();
 }
