@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-DroidNet-SHADOW-C2B5 (formerly SHADOW-C2B5) is DroidNet's port of SHADOW: the main controller firmware for the C2-B5 astromech droid: a heavily modified SHADOW+MD running on an Arduino Mega ADK. It reads PS3 Move Navigation controllers over Bluetooth (USB Host Shield), drives the feet (Sabertooth) and dome (SyRen), and sends serial commands to the rest of the droid. It moved here from the `SHADOWC2B5/` folder of the C2B5 repo, which holds the other boards and the earlier history.
+DroidNet-SHADOW-C2B5 (formerly SHADOW-C2B5) is DroidNet's port of SHADOW: the main controller firmware for the C2-B5 astromech droid: a heavily modified SHADOW+MD running on an Arduino Mega ADK. It reads PS3 Move Navigation controllers over Bluetooth (USB Host Shield), drives the feet (Sabertooth) and dome (SyRen), and sends serial commands to the rest of the droid. It moved here from the `SHADOWC2B5/` folder of the C2B5 repo, which holds the other boards and the earlier history. It is single-purpose by design: one droid's parts (Mega ADK, PS3 Move Navs, Sabertooth + SyRen in packetized serial, a WCB) and no options for other hardware. Keep it that way rather than adding configurability.
 
 **CRITICAL SAFETY**: This code controls a physical robot. The main loop must NEVER be blocked as this could cause the robot to go out of control and cause harm. Real-time motor control and fault detection are safety-critical functions.
 
