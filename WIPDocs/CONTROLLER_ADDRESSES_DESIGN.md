@@ -173,3 +173,28 @@ Test-first, on the host (`native`) and the emulated Mega (`simavr`):
 - A Controllers panel in DroidNet's SHADOW tab (DroidNet's repo, later).
 - A `mac` command in the reference client `tools/shadowmap` (add it when DroidNet ports the panel).
 - Learning a controller's address automatically when it's paired.
+
+## Bench test (2026-10-16)
+
+On C2-B5, motors off and wheels up except where noted. Candidate `SHADOWC2B5_9acc997.hex`
+(sha256 `1bc9cb049be86d1322f323a6dfc2cf3d476a76df2411ca6afe8daf0464089b6c`), built by
+`scripts/build_release.sh` with no local address in it. Rollback dump of the firmware before it
+(`f098694`): `/root/shadow-backups/shadow-pre-macs-2026-10-16.hex` on c2-body.
+
+- **The address race, before:** on `f098694`, dome PS then foot PS within about a second put the
+  dome controller in the foot slot (its UP arrived as `F.NONE.UP`) and refused the foot controller.
+- **Flash:** through DroidNet's Firmware endpoint (Board Type Arduino Mega): 57,946 bytes written and
+  verified. SHADOW came back as `fw=9acc997`, link ready, button map in sync (untouched).
+- **Allow:** over SHADOW's USB port, as DroidNet's Serial tab does: `@SM MAC` listed four empty slots;
+  each controller was refused once (`REFUSED F`, then `REFUSED D`, its own address) and connected after
+  `@SM MAC F|D <address>`. One dome press after the allow connected and was then dropped by the
+  controller itself about 2 s later (its own disconnect request, no refusal); the next press connected.
+- **Revoke while connected:** `@SM MAC D -` dropped the connected dome controller within the same second.
+- **The address race, after:** dome PS then foot PS: the dome was refused as `F` under its own address and
+  the foot controller connected as the foot. Nothing ended up in the wrong role.
+- **Revoke while off:** with the dome off, `@SM MAC D -`, then dome PS: refused as `D`; the foot stayed
+  connected throughout.
+- **Through the WCB:** `@SM HELLO` sent through WCB 1 (DroidNet's `/api/wcb/command`) answered with
+  `pads=` as expected.
+- **Drive:** the owner drove with both controllers connected; no problem reported.
+- **Not run:** revoke while driving (the owner didn't need it; revoke-while-connected above covers the drop).
