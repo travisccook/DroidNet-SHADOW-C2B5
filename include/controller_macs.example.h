@@ -6,7 +6,8 @@
 // =======================================================================================
 //
 // Copy this file to include/controller_macs.h and replace the placeholders with your
-// controllers' Bluetooth addresses (uppercase, colon-separated). controller_macs.h is
+// controllers' Bluetooth addresses (uppercase, two digits a byte, colon-separated, as in
+// "00:1A:2B:3C:4D:05"). controller_macs.h is
 // gitignored so your addresses stay out of the repository.
 //
 // A controller may connect only if its address matches one of these. Any other

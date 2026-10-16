@@ -88,6 +88,7 @@
 #include <PS3BT.h>
 #include <usbhub.h>
 #include "../lib/Sabertooth/Sabertooth.h"
+#include "../include/bt_address.h"
 #include "../include/config.h"
 #include "../include/default_mappings.h"
 #include "../include/sm_uart_avr.h"
@@ -1024,17 +1025,9 @@ void onInitPS3NavDome() {
 }
 
 String getLastConnectedBtMAC() {
-    String btAddress = "";
-    for (int8_t i = 5; i > 0; i--) {
-        if (Btd.disc_bdaddr[i] < 0x10) {
-            btAddress += "0";
-        }
-        btAddress += String(Btd.disc_bdaddr[i], HEX);
-        btAddress += (":");
-    }
-    btAddress += String(Btd.disc_bdaddr[0], HEX);
-    btAddress.toUpperCase();
-    return btAddress;
+    char btAddress[kBtAddressBuf];
+    formatBtAddress(Btd.disc_bdaddr, btAddress);
+    return String(btAddress);
 }
 
 boolean criticalFaultDetect() {
