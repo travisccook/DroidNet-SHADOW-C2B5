@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """This tree's mapping code against golden/v4 (tools/shadowmap/transcripts.py): goldens recorded from
 0a8b73f with the raw-commands plan's Tasks 1-3 applied verbatim (@SM v4: READY says v4, a raw-commands
-session). golden/v4 is golden/v3 (0a8b73f itself) with "v4" in every READY, plus the raw session, plus
-one change of its own: in shipped, the announce goes out one DUMP line earlier (kMaxLine 96 makes a
-DUMP line wait for more room). golden/v3 stays for reference; nothing compares with it now.
+session). golden/v4 is 0a8b73f's own recording (golden/v3, removed 2026-10-16; in git history) with
+"v4" in every READY, plus the raw session, plus one change of its own: in shipped, the announce goes
+out one DUMP line earlier (kMaxLine 96 makes a DUMP line wait for more room).
 
 Up to the Serial1 adapter every byte matched, "!!IDLE" clocks included. Timing round 2's pass
 rule (WIPDocs/TIMING_ROUND_2_DESIGN.md, section 3) moves the mapping's work after the motors and
@@ -42,7 +42,7 @@ The documented differences from 0a8b73f, each tied to the script line that cause
 7. a second request already in the RX buffer waits one pass (design section 3), so a background
    line (here a DUMP line) can go before its reply (COINCIDE and COINCIDE_PACED).
 
-The raw-commands firmware (WIPDocs/RAW_COMMANDS_DESIGN.md) adds three, all timing only:
+The raw-commands firmware (WIPDocs/COMMAND_MAPPING_DESIGN.md, Raw commands) adds three, all timing only:
 
 8. a request reads at most Runtime::kMaxBytesPerPass = 32 bytes a pass, where golden/v4 read 64, so
    a request over 32 bytes on the wire (its text and the WCB's "\r") takes more passes to read

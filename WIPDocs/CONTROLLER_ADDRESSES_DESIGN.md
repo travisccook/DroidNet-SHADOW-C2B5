@@ -1,6 +1,8 @@
 # Controller Addresses at Runtime
 
-Design, 2026-10-16. Approved by the owner in conversation; this is the written spec for review.
+**Status:** implemented (`1e14005`..`9acc997`), released as v1.0.0 (`SHADOWC2B5_9acc997.hex`) and running on
+C2-B5 since 2026-10-16 (see [Bench test](#bench-test-2026-10-16)). Designed 2026-10-16 and approved by the owner in
+conversation.
 
 ## Why
 

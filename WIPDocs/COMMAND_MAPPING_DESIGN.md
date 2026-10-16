@@ -1,14 +1,15 @@
 # Runtime Button Mapping
 
-**Status:** implemented, and merged to `main` in [PR #1](https://github.com/travisccook/DroidNet-SHADOW-C2B5/pull/1). It is
-tested on the host, on an emulated ATmega2560 (simavr), and against the reference Pi client.
-**It runs on the droid** (`e3f6b82`, flashed 2026-09-24). Verified there: the WCB link in both directions, every
-verb, and EEPROM persistence across a reset. Not yet tested: real button presses, driving, and a power cycle
-([results on PR #1](https://github.com/travisccook/DroidNet-SHADOW-C2B5/pull/1#issuecomment-5817847387)). The DroidNet
-side is being built. Its design and UI live in the
-DroidNetSignalBooster repo: [backend design](https://github.com/travisccook/DroidNetSignalBooster/blob/main/docs/superpowers/specs/2026-09-24-shadow-button-map-design.md) and
-[UI design and mockup](https://github.com/travisccook/DroidNetSignalBooster/blob/main/docs/superpowers/specs/2026-09-24-shadow-button-map-ui-design.md). Work in progress is tracked in
-[HANDOFF_BUTTON_MAP.md](HANDOFF_BUTTON_MAP.md).
+**Status:** implemented (first merged to `main` in [PR #1](https://github.com/travisccook/DroidNet-SHADOW-C2B5/pull/1)),
+tested on the host, on an emulated ATmega2560 (simavr), and against the reference Pi client. **C2-B5 runs
+`9acc997`** (release v1.0.0, flashed 2026-10-16), which has everything below: double taps, long presses, raw
+commands and the allowed-controller list ([CONTROLLER_ADDRESSES_DESIGN.md](CONTROLLER_ADDRESSES_DESIGN.md)).
+Verified on the droid: the WCB link in both directions, every verb, EEPROM persistence across a reset and a full
+power cycle (2026-09-24, [results on PR #1](https://github.com/travisccook/DroidNet-SHADOW-C2B5/pull/1#issuecomment-5817847387)),
+and real presses with live `PRESS` and `CTL` events, and driving with both controllers (2026-10-16). What's still
+open is under [Not done yet](#not-done-yet). DroidNet's side lives in the DroidNetSignalBooster repo:
+[backend design](https://github.com/travisccook/DroidNetSignalBooster/blob/main/docs/superpowers/specs/2026-09-24-shadow-button-map-design.md) and
+[UI design and mockup](https://github.com/travisccook/DroidNetSignalBooster/blob/main/docs/superpowers/specs/2026-09-24-shadow-button-map-ui-design.md).
 
 ## What it does
 
@@ -75,7 +76,7 @@ WCB references are to `travisccook/Wireless_Communication_Board-WCB` `main` at `
    wire (seen when WCB 1 resets at power-up) can't swallow the next request. `?BCAST,OUT,S<x>,OFF` on SHADOW's port cuts the
    traffic, since SHADOW doesn't need it.
 4. **WCB debug echoes are ignored.** With WCB debug on, the Pi also sees `Sent to USB: @SM ...`
-   and similar lines. Clients only act on lines that *start* with `@SM `.
+   and similar lines. Clients only act on lines that _start_ with `@SM `.
 5. **The link runs at 9600 baud in a noisy droid.** Every line in both directions carries a
    CRC32.
 
@@ -96,8 +97,8 @@ held for a long press.
 
 - **The gate.** A combo only reaches the mapping when the controller has a direction or L3 held,
   or PS with L1/L2. This is the same gate as before.
-- **The layer.** The highest-priority held modifier picks the layer: `L1, L2, PS, CIRCLE,
-  CROSS`, then no modifier. CROSS, CIRCLE and PS also count when they're held on the other
+- **The layer.** The highest-priority held modifier picks the layer:
+  `L1, L2, PS, CIRCLE, CROSS`, then no modifier. CROSS, CIRCLE and PS also count when they're held on the other
   controller, if it's connected. L1 and L2 only count on the same controller.
 - **The slot.** The first held primary in the order `UP, LEFT, RIGHT, DOWN`, then `PS` and `L3`,
   picks the slot within the layer. The L1 layer checks L3 before PS and every other layer PS
@@ -114,7 +115,8 @@ purpose.
 
 ### Raw commands
 
-Added 2026-10-03 (protocol v4). Design: `WIPDocs/RAW_COMMANDS_DESIGN.md`. Any slot (single press, double
+Added 2026-10-03 (protocol v4). Design: DroidNetSignalBooster's
+[raw commands spec](https://github.com/travisccook/DroidNetSignalBooster/blob/main/docs/superpowers/specs/2026-10-02-shadow-raw-commands-design.md). Any slot (single press, double
 tap or long press) can hold a raw command instead of a stored-command key: 1-15 printable ASCII
 characters (0x20-0x7E, space included), never empty (empty means unmapped).
 
@@ -175,15 +177,15 @@ Added 2026-09-29. Design: DroidNet's
 A long press is a combo held for `SHADOW_LONG_PRESS_MS` (600 ms, `include/config.h`). A combo whose
 long press is mapped waits, and starts its timer from the press:
 
-| What happens next | What fires |
-| --- | --- |
-| Still held at 0.6 s | The long press, at once. Then nothing until release (`Latched`). |
-| Released before 0.6 s, no double tap mapped | The single tap, on release. |
-| Released before 0.35 s, double tap mapped, second press in time | The double tap, on the second press (exactly as before). |
-| Released before 0.35 s, double tap mapped, no second press | The single tap, when the window closes (as before). |
-| Released between 0.35 s and 0.6 s, double tap mapped | The single tap, on release (the window has already closed). |
-| Another combo pressed on the same controller while it waits | The waiting combo's single tap, at once; the new combo is handled on its own. |
-| The controller drops while it waits | Nothing: the press is dropped (as before). |
+| What happens next                                               | What fires                                                                    |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| Still held at 0.6 s                                             | The long press, at once. Then nothing until release (`Latched`).              |
+| Released before 0.6 s, no double tap mapped                     | The single tap, on release.                                                   |
+| Released before 0.35 s, double tap mapped, second press in time | The double tap, on the second press (exactly as before).                      |
+| Released before 0.35 s, double tap mapped, no second press      | The single tap, when the window closes (as before).                           |
+| Released between 0.35 s and 0.6 s, double tap mapped            | The single tap, on release (the window has already closed).                   |
+| Another combo pressed on the same controller while it waits     | The waiting combo's single tap, at once; the new combo is handled on its own. |
+| The controller drops while it waits                             | Nothing: the press is dropped (as before).                                    |
 
 - **The long press only fires if the combo is still held on the pass that reaches the threshold.**
   A release, or another combo, seen first on that pass gives the single press instead.
@@ -214,18 +216,18 @@ long press is mapped waits, and starts its timer from the press:
 **Reserved slots** are hardcoded in `main.cpp` or never reach the mapping. They can't be
 mapped, and `SLOT` lines say why:
 
-| Slot | `res=` | Why |
-| --- | --- | --- |
-| `PS` + `NONE` / `PS` / `CIRCLE` / `CROSS`, both controllers | `psgate` | PS is only a button with L1/L2 held. PS+CROSS and PS+CIRCLE toggle the drive stick. |
-| `F L1 L3` | `overspeed` | Over-speed toggle |
-| every `L32` (double tap of L3) | `stick` | The stick click has no double tap |
-| every `L3L` (long press of L3) | `stick` | The stick click has no long press |
+| Slot                                                        | `res=`      | Why                                                                                 |
+| ----------------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------- |
+| `PS` + `NONE` / `PS` / `CIRCLE` / `CROSS`, both controllers | `psgate`    | PS is only a button with L1/L2 held. PS+CROSS and PS+CIRCLE toggle the drive stick. |
+| `F L1 L3`                                                   | `overspeed` | Over-speed toggle                                                                   |
+| every `L32` (double tap of L3)                              | `stick`     | The stick click has no double tap                                                   |
+| every `L3L` (long press of L3)                              | `stick`     | The stick click has no long press                                                   |
 
 The double tap of a reserved slot is reserved for the same reason (`F L1 L32` is `overspeed`).
 The long press of a reserved slot is reserved too. That leaves 31 foot slots and 32 dome slots
 for single presses, and 26 on each controller for double taps and for long presses.
 
-**Fixed along the way:** L3+L1 on the *dome* controller used to toggle foot over-speed as well
+**Fixed along the way:** L3+L1 on the _dome_ controller used to toggle foot over-speed as well
 as firing Front Holo Center. Over-speed now only listens to the foot controller.
 
 ## EEPROM layout
@@ -317,33 +319,33 @@ digits. SHADOW accepts upper or lower case and sends upper case.
 
 ### Requests
 
-| Request | Reply |
-| --- | --- |
-| `HELLO [route]` | `READY v4 fw=<ver> slots=216 gen=<g> fmt=<0\|1> pads=<FD\|F\|D\|->`. `route` sets where replies go on the WCB port: `0` (the default) = `;S0`, `n` = `;W<n>;S0`. It is kept in RAM, so the Pi should send HELLO after SHADOW reboots. |
-| `CFG` | `CFG pre=<hex> suf=<hex\|->` |
-| `GET <slot>` | `SLOT <slot> <key\|!hex\|-> <src> def=<key\|->` (`!hex`: a raw command), or for a reserved slot `SLOT <slot> - reserved res=<reason>`. `src` is `eeprom`, `default` or `reserved`. |
-| `SET <slot> <key\|!hex\|->` | `OK SET <slot> <key\|!HEX\|->` once written and verified. `-` unmaps the slot, as a custom value. `!hex` (either case) sets a raw command; the echo is upper case. |
-| `REVERT <slot>` | `OK REVERT <slot>`. The slot is back on its built-in default (`src=default`). |
-| `DUMP` | 216 `SLOT` lines in slot order (single presses, double taps, then long presses), then `END DUMP 216`. About 12.5 s at 9600 baud. |
-| `SUM` | `SUM <8 hex> slots=216`: the CRC32 over, for each slot in order, its `SLOT` line text after `@SM SLOT ` plus `\n`. The Pi can compute the same over a cached DUMP and skip the DUMP when they match. About 0.4 s. |
-| `DEFAULTS` | `OK DEFAULTS gen=<g>`. Every slot is back on its built-in default. |
-| `PREFIX <hex>` | `OK PREFIX <hex>`. The prefix must start with `;`, can't end with `;`, is at most 11 printable characters, and has no `^` and no `;T`/`;t`. |
-| `SUFFIX <hex\|->` | `OK SUFFIX <hex\|->`. At most 7 printable characters, no `^`, no `;T`/`;t`. |
-| `EVENTS <0\|1>` | `OK EVENTS <0\|1>`. With 1, this port gets the events below. |
-| `BAT` | `BAT F=<lvl> D=<lvl> fs=<st> ds=<st> up=<s> hb=<s>`: the controllers' battery levels (see [Battery reports](#battery-reports)). |
-| `MAC` | Four lines, F, D, F2, D2, one a pass: `MAC <S> <address\|-> <eeprom\|default>`. Refused with `ERR busy` while another operation runs, like DUMP. |
-| `MAC <S>` | `MAC <S> <address\|-> <eeprom\|default>`. Always answered, like GET. `S` is `F`, `D`, `F2` or `D2`. |
-| `MAC <S> <address\|-\|default>` | `OK MAC <S> <ADDRESS\|-\|default>` once written and verified: an address (`HH:HH:HH:HH:HH:HH`, either case; echoed upper case), `-` for no controller, `default` for the build's. A write: one at a time with SET and the others. |
+| Request                         | Reply                                                                                                                                                                                                                                 |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `HELLO [route]`                 | `READY v4 fw=<ver> slots=216 gen=<g> fmt=<0\|1> pads=<FD\|F\|D\|->`. `route` sets where replies go on the WCB port: `0` (the default) = `;S0`, `n` = `;W<n>;S0`. It is kept in RAM, so the Pi should send HELLO after SHADOW reboots. |
+| `CFG`                           | `CFG pre=<hex> suf=<hex\|->`                                                                                                                                                                                                          |
+| `GET <slot>`                    | `SLOT <slot> <key\|!hex\|-> <src> def=<key\|->` (`!hex`: a raw command), or for a reserved slot `SLOT <slot> - reserved res=<reason>`. `src` is `eeprom`, `default` or `reserved`.                                                    |
+| `SET <slot> <key\|!hex\|->`     | `OK SET <slot> <key\|!HEX\|->` once written and verified. `-` unmaps the slot, as a custom value. `!hex` (either case) sets a raw command; the echo is upper case.                                                                    |
+| `REVERT <slot>`                 | `OK REVERT <slot>`. The slot is back on its built-in default (`src=default`).                                                                                                                                                         |
+| `DUMP`                          | 216 `SLOT` lines in slot order (single presses, double taps, then long presses), then `END DUMP 216`. About 12.5 s at 9600 baud.                                                                                                      |
+| `SUM`                           | `SUM <8 hex> slots=216`: the CRC32 over, for each slot in order, its `SLOT` line text after `@SM SLOT ` plus `\n`. The Pi can compute the same over a cached DUMP and skip the DUMP when they match. About 0.4 s.                     |
+| `DEFAULTS`                      | `OK DEFAULTS gen=<g>`. Every slot is back on its built-in default.                                                                                                                                                                    |
+| `PREFIX <hex>`                  | `OK PREFIX <hex>`. The prefix must start with `;`, can't end with `;`, is at most 11 printable characters, and has no `^` and no `;T`/`;t`.                                                                                           |
+| `SUFFIX <hex\|->`               | `OK SUFFIX <hex\|->`. At most 7 printable characters, no `^`, no `;T`/`;t`.                                                                                                                                                           |
+| `EVENTS <0\|1>`                 | `OK EVENTS <0\|1>`. With 1, this port gets the events below.                                                                                                                                                                          |
+| `BAT`                           | `BAT F=<lvl> D=<lvl> fs=<st> ds=<st> up=<s> hb=<s>`: the controllers' battery levels (see [Battery reports](#battery-reports)).                                                                                                       |
+| `MAC`                           | Four lines, F, D, F2, D2, one a pass: `MAC <S> <address\|-> <eeprom\|default>`. Refused with `ERR busy` while another operation runs, like DUMP.                                                                                      |
+| `MAC <S>`                       | `MAC <S> <address\|-> <eeprom\|default>`. Always answered, like GET. `S` is `F`, `D`, `F2` or `D2`.                                                                                                                                   |
+| `MAC <S> <address\|-\|default>` | `OK MAC <S> <ADDRESS\|-\|default>` once written and verified: an address (`HH:HH:HH:HH:HH:HH`, either case; echoed upper case), `-` for no controller, `default` for the build's. A write: one at a time with SET and the others.     |
 
 ### Events
 
 These are only sent with `EVENTS 1`, and are dropped rather than queued if the link is busy.
 
-| Event | When |
-| --- | --- |
+| Event                                                            | When                                                                                                                                                                                                                                                     |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `PRESS <slot> <key\|!hex\|-> <src> [from=<F\|D>] [res=<reason>]` | Any combo that reaches the mapping, mapped or not, when it fires: a double tap as `UP2`, a long press as `UPL` when it fires, a combo that waited for a second tap when its window closes. `from=` means the modifier was held on that other controller. |
-| `CTL <F\|D> <0\|1>` | A controller connected or dropped |
-| `REFUSED <F\|D> <address>` | A paired controller that isn't allowed tried to connect, as the foot or the dome. Also sent to the USB port without EVENTS. |
+| `CTL <F\|D> <0\|1>`                                              | A controller connected or dropped                                                                                                                                                                                                                        |
+| `REFUSED <F\|D> <address>`                                       | A paired controller that isn't allowed tried to connect, as the foot or the dome. Also sent to the USB port without EVENTS.                                                                                                                              |
 
 ### Battery reports
 
@@ -381,13 +383,13 @@ controller sends. It sends this line to the WCB port by itself, whether or not E
 
 **How the level is decided** (`lib/ShadowMap/src/sm_battery.cpp`):
 
-| Status byte | Reported as | Level |
-| --- | --- | --- |
-| `0x03`-`0x05` | `3`-`5` | `OK` |
-| `0x02` | `2` | `LOW` |
-| `0x00`-`0x01` | `0`-`1` | `CRIT` |
-| `0xEE` and up | `chg` (even) / `usb` (odd) | `OK` |
-| anything else | ignored | |
+| Status byte   | Reported as                | Level  |
+| ------------- | -------------------------- | ------ |
+| `0x03`-`0x05` | `3`-`5`                    | `OK`   |
+| `0x02`        | `2`                        | `LOW`  |
+| `0x00`-`0x01` | `0`-`1`                    | `CRIT` |
+| `0xEE` and up | `chg` (even) / `usb` (odd) | `OK`   |
+| anything else | ignored                    |        |
 
 A new level has to hold before SHADOW adopts it, so a reading flickering at a step boundary
 doesn't flap: 2 s for the first reading of a connection, 3 s for a worse level, 30 s for a
@@ -402,18 +404,18 @@ going after it first reports `LOW` (`2`) or `CRIT` (`1`).
 
 The format is `ERR <code> [<VERB> [<slot>]]`.
 
-| Code | Meaning |
-| --- | --- |
-| `crc` | The CRC was missing or wrong (the verb isn't echoed). Resend. |
-| `busy` | Another operation is running. Retry shortly. |
-| `args` | Wrong number or shape of arguments |
-| `verb` | Unknown verb |
-| `slot` | Not a valid `<C> <M> <B>` |
-| `reserved` | The slot is reserved |
-| `key` | Not `[A-Za-z0-9_]{1,15}`, `-`, or `!` and the hex of 1-15 bytes 0x20-0x7E (odd length, a bad digit, `!`, `!-`, a NUL, 16 or more bytes) |
-| `prefix` / `suffix` | The value breaks the rules above |
-| `eeprom` | The write didn't verify after one retry |
-| `addr` | Not a usable address (`HH:HH:HH:HH:HH:HH`, not all 0 or all FF) |
+| Code                | Meaning                                                                                                                                 |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `crc`               | The CRC was missing or wrong (the verb isn't echoed). Resend.                                                                           |
+| `busy`              | Another operation is running. Retry shortly.                                                                                            |
+| `args`              | Wrong number or shape of arguments                                                                                                      |
+| `verb`              | Unknown verb                                                                                                                            |
+| `slot`              | Not a valid `<C> <M> <B>`                                                                                                               |
+| `reserved`          | The slot is reserved                                                                                                                    |
+| `key`               | Not `[A-Za-z0-9_]{1,15}`, `-`, or `!` and the hex of 1-15 bytes 0x20-0x7E (odd length, a bad digit, `!`, `!-`, a NUL, 16 or more bytes) |
+| `prefix` / `suffix` | The value breaks the rules above                                                                                                        |
+| `eeprom`            | The write didn't verify after one retry                                                                                                 |
+| `addr`              | Not a usable address (`HH:HH:HH:HH:HH:HH`, not all 0 or all FF)                                                                         |
 
 ### Client rules
 
@@ -448,9 +450,8 @@ firmware older than 6.2.1, which would broadcast the line instead.
 - **It goes through the TX queue** like everything else, so it never blocks and never lands inside a
   command or a reply. A `static_assert` in `main.cpp` keeps the line within the 64-byte UART buffer.
 
-These follow the owner's announce decisions in
-[HANDOFF_2026-09-23_shadow_wdp_device_announce.md](HANDOFF_2026-09-23_shadow_wdp_device_announce.md),
-with one change the owner made on 2026-09-24: SHADOW now also *reads* Serial1, for `@SM`.
+These follow the owner's announce decisions of 2026-09-23 (SHADOW alone announces; it's alone on its WCB
+port), with one change the owner made on 2026-09-24: SHADOW now also _reads_ Serial1, for `@SM`.
 
 ## DroidNet's export (the mapping on paper)
 
@@ -459,11 +460,25 @@ That replaces the old control-mapping spreadsheet, which is retired. DroidNet ow
 (`docs/superpowers/HANDOFF_2026-09-24_shadow_button_map.md`) is the reference. Version 1 looks like this:
 
 ```json
-{ "format": "droidnet-shadow-map", "version": 1, "exported": "<ISO time>", "booster": "c2-body",
-  "shadow": { "fw": "af4db5d", "gen": 1 }, "prefix": ";W1;C", "suffix": "",
-  "slots": { "F": { "L1": { "UP": { "key": "extremehappysou", "src": "default" },
-                          "PS": { "key": null, "src": "default" } } }, "D": { } },
-  "labels": { "extremehappysou": "HCR Extreme Happy" } }
+{
+  "format": "droidnet-shadow-map",
+  "version": 1,
+  "exported": "<ISO time>",
+  "booster": "c2-body",
+  "shadow": { "fw": "af4db5d", "gen": 1 },
+  "prefix": ";W1;C",
+  "suffix": "",
+  "slots": {
+    "F": {
+      "L1": {
+        "UP": { "key": "extremehappysou", "src": "default" },
+        "PS": { "key": null, "src": "default" }
+      }
+    },
+    "D": {}
+  },
+  "labels": { "extremehappysou": "HCR Extreme Happy" }
+}
 ```
 
 - Slots use the same `<C> <M> <B>` names as the protocol. Each is `{key: string|null, src: "default"|"eeprom"}`, so a
@@ -478,17 +493,17 @@ That replaces the old control-mapping spreadsheet, which is retired. DroidNet ow
 
 ## Firmware structure
 
-| File | What |
-| --- | --- |
-| `lib/ShadowMap/src/sm_slots.*` | Slot layout, tokens, reserved slots |
-| `lib/ShadowMap/src/sm_resolve.*` | Held buttons to slot (the lookup rule) |
-| `lib/ShadowMap/src/sm_store.*` | EEPROM store (headers, slots, the background writer) |
-| `lib/ShadowMap/src/sm_protocol.*` | The `@SM` protocol, `WcbPort` reply routing |
-| `lib/ShadowMap/src/sm_line.*`, `sm_tx.*` | Non-blocking line reader, Serial1 TX queue that always keeps room for a button command |
-| `lib/ShadowMap/src/sm_runtime.*` | What `loop()` does for the mapping: repeat timing, deferred presses, request pumping, the announce |
-| `lib/ShadowMap/src/sm_crc.*`, `sm_eeprom.h`, `sm_pgm.h` | CRC16/CRC32, EEPROM access, flash-string shims for host builds |
-| `src/default_mappings.cpp` | The built-in mappings (edit these; see CLAUDE.md) |
-| `src/main.cpp` | Reads the controllers into `sm::PadState`, calls the runtime; `UsbReplyPort` sends USB replies with the debug output |
+| File                                                    | What                                                                                                                 |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `lib/ShadowMap/src/sm_slots.*`                          | Slot layout, tokens, reserved slots                                                                                  |
+| `lib/ShadowMap/src/sm_resolve.*`                        | Held buttons to slot (the lookup rule)                                                                               |
+| `lib/ShadowMap/src/sm_store.*`                          | EEPROM store (headers, slots, the background writer)                                                                 |
+| `lib/ShadowMap/src/sm_protocol.*`                       | The `@SM` protocol, `WcbPort` reply routing                                                                          |
+| `lib/ShadowMap/src/sm_line.*`, `sm_tx.*`                | Non-blocking line reader, Serial1 TX queue that always keeps room for a button command                               |
+| `lib/ShadowMap/src/sm_runtime.*`                        | What `loop()` does for the mapping: repeat timing, deferred presses, request pumping, the announce                   |
+| `lib/ShadowMap/src/sm_crc.*`, `sm_eeprom.h`, `sm_pgm.h` | CRC16/CRC32, EEPROM access, flash-string shims for host builds                                                       |
+| `src/default_mappings.cpp`                              | The built-in mappings (edit these; see CLAUDE.md)                                                                    |
+| `src/main.cpp`                                          | Reads the controllers into `sm::PadState`, calls the runtime; `UsbReplyPort` sends USB replies with the debug output |
 
 The library has no Arduino dependency, so it builds and tests on the host.
 
@@ -523,16 +538,16 @@ The library has no Arduino dependency, so it builds and tests on the host.
 
   **Worst figures:**
 
-  | us | Pass |
-  |---:|---|
-  | 921.5 | three presses due + a write's last step: two fire, one waits (the worst press-only pass) |
+  |    us | Pass                                                                                                                 |
+  | ----: | -------------------------------------------------------------------------------------------------------------------- |
+  | 921.5 | three presses due + a write's last step: two fire, one waits (the worst press-only pass)                             |
   | 906.5 | full 32-byte budget ending a raw GET, the 93-character SLOT answered, + battery change + drain (the worst read pass) |
-  | 904.0 | the same GET answered as a raw SET's (or DEFAULTS') finishing step comes due |
-  | 901.0 | GET pass: raw command on F CIRCLE RIGHTL, 93-character SLOT line |
-  | 881.5 | three raw presses due + a raw SET's last step: two fire, one waits |
-  | 811.0 | GET pass: F CIRCLE RIGHTL (15-char key over 15-char default) |
-  | 713.5 | four presses due in one pass (two fire, two wait a pass) |
-  | 708.5 | 32 junk bytes read + battery report + DEFAULTS' finishing step + drain (the worst junk pass) |
+  | 904.0 | the same GET answered as a raw SET's (or DEFAULTS') finishing step comes due                                         |
+  | 901.0 | GET pass: raw command on F CIRCLE RIGHTL, 93-character SLOT line                                                     |
+  | 881.5 | three raw presses due + a raw SET's last step: two fire, one waits                                                   |
+  | 811.0 | GET pass: F CIRCLE RIGHTL (15-char key over 15-char default)                                                         |
+  | 713.5 | four presses due in one pass (two fire, two wait a pass)                                                             |
+  | 708.5 | 32 junk bytes read + battery report + DEFAULTS' finishing step + drain (the worst junk pass)                         |
 
   Round 2 (`5443ae6`) had 944.5 for the 63-byte read, 892.0 for three presses + a write's last step and
   812.5 for four presses due (three fire).
@@ -558,6 +573,7 @@ The library has no Arduino dependency, so it builds and tests on the host.
     and dropped so Serial1's 64-byte RX buffer can't overflow. It counts as its pass's request.
   - USB replies wait until the debug output is nearly empty, so `printOutput()` never writes
     more than about 128 bytes for them.
+
 - **Round trips on SHADOW's side,** from the simulator, 9600 baud: GET about 75 ms, SET about
   120 ms (250 ms for the first write, which formats the EEPROM), SUM about 330 ms, DUMP about
   7.9 s for 144 slots (4.2 s for 72); expect about 12 s for 216. The inbound leg adds about 1 ms per character.
@@ -621,13 +637,35 @@ python3 -m unittest tools/shadowmap/test_transcripts.py # what SHADOW sends, aga
 
 ## Not done yet
 
-- On the droid: real button presses, driving while editing, and a power cycle (HANDOFF_BUTTON_MAP.md §0).
-- On the droid: raw commands (2026-10-03). Worth checking: one raw command fired from a controller, and
-  that the owner's map survives the flash (SUM against DroidNet's saved copy).
-- On the droid: long presses. Worth checking: 600 ms on a Navigation controller, and the v3 DUMP
-  time through the WCB.
-- On the droid: double taps (`bde79a4`). Tested on the host, simavr and through DroidNet against the simulator only.
-  Worth checking: that 350 ms suits a Navigation controller's D-pad, and the v2 DUMP time through the WCB.
-- The DroidNet tab and backend (see the [backend design](https://github.com/travisccook/DroidNetSignalBooster/blob/main/docs/superpowers/specs/2026-09-24-shadow-button-map-design.md)).
-- New WCB stored commands for volume and brightness, then map them.
+**On the droid.** C2-B5's firmware has all of these; nothing records them being checked there yet:
+
+- One remap end to end: `SET F NONE L3 scanning`, press foot L3 (the probe-droid scan plays), then
+  `REVERT F NONE L3`. And DroidNet's Find by pressing a combo.
+- WCB 1's `alarm` (foot CIRCLE+LEFT: the Death Star klaxon and a 120 s red Flthy pulse) and `sadsound`
+  (foot RIGHT) stored commands. Both were recreated on WCB 1 on 2026-09-24 and have never been fired.
+- Driving while DroidNet reads the map (repeated `DUMP`s): driving must feel unchanged.
+- A raw command fired from a controller.
+- Long presses: whether 600 ms suits a Navigation controller.
+- Double taps: whether 350 ms suits a Navigation controller's D-pad.
+
+**Hardware questions for the owner.**
+
+- SHADOW's 5 V TX1 drives WCB 1's RX, which on WCB V2.4 goes straight to an ESP32 GPIO with no level
+  shifter (the stress is continuous, since a UART idles high). A divider on that one wire, for example
+  1 kΩ in series and 2 kΩ to GND, would fix it.
+- Is SHADOW fed on VIN (7 V or more) or on 5 V? The Mega ADK's power switch watches only VIN, so a board
+  fed on 5 V (or on VIN below about 6.6 V) meets the USB host's 5 V when flashing over USB. With the droid's
+  rail on and USB unplugged, about 5 V from VBUS to GND on the USB-B socket means use a USB power blocker.
+
+**Firmware.**
+
+- `criticalFaultDetect()` and `criticalFaultDetectDome()` in `src/main.cpp` still `delay(100)` when a
+  controller's report has a bad status byte (`delay(15)` for the foot when no dome controller is
+  connected). That blocks the whole loop for up to 100 ms a pass while the data stays bad. Found by the
+  2025 safety review (`POTENTIALSAFETYISSUES.md`, removed 2026-10-16; in git history). Its other findings
+  don't hold against today's code or fail safe: the foot reconnect flag clears as soon as reports arrive
+  (`Usb.Task()` runs before the check every pass), `lastMsgTime` has no race (one thread), and the dome
+  stopping on a foot fault, the 30 s first-message timer and the duplicate foot stop are all fail-safe.
+- New WCB stored commands for volume and brightness, then map them (built-in defaults or DroidNet only:
+  undecided).
 - Maybe: a "learn" mode (report a press without firing it) and a lock notice. Neither is built.

@@ -1,6 +1,7 @@
 # Timing round 2: every mapping pass under 1 ms, motors first
 
-**Status:** implemented on branch timing/round-2 (to be merged to main and tagged `stage/timing-round-2`), 2026-10-02 / 2026-10-03; not flashed.
+**Status:** implemented 2026-10-02 / 2026-10-03 (tag `stage/timing-round-2`) and on `main`; C2-B5 runs it
+(`9acc997`, flashed 2026-10-16). The base, delivery and flashing notes below are as they stood during round 2.
 **Base:** `main` at `52df1b9` (timing Part A, tagged `stage/timing-part-a`). The droid runs `0a8b73f`
 (tagged `droid/c2-body-2026-09-29`).
 **Delivers:** tag `stage/timing-round-2`. Raw commands (@SM v4) are rebased on top afterwards, under their own
@@ -27,15 +28,15 @@ something is wrong.
 `test_avr_timing_*` (126 figures, report only): 5 at or over 1 ms, all a press firing in the pass a request is
 handled.
 
-| Pass | Part A |
-| --- | --- |
-| A SET in flight and a long press | 1115 us |
-| The worst GET, a long press and the drain | 1092.5 us |
-| A press with its PRESS line, a SET mid-write | 1073 us |
-| A press and a SET | 1072 us |
-| A press and the worst GET | 1014 us |
-| Four presses (no request) | 990.5 us |
-| Two requests in the RX buffer, no press | 977.5 us |
+| Pass                                         | Part A    |
+| -------------------------------------------- | --------- |
+| A SET in flight and a long press             | 1115 us   |
+| The worst GET, a long press and the drain    | 1092.5 us |
+| A press with its PRESS line, a SET mid-write | 1073 us   |
+| A press and a SET                            | 1072 us   |
+| A press and the worst GET                    | 1014 us   |
+| Four presses (no request)                    | 990.5 us  |
+| Two requests in the RX buffer, no press      | 977.5 us  |
 
 The pieces: a press is about 290 us, and its PRESS event line (EVENTS on) adds about 280 us. `handleLine` is
 180-590 us (GET the most). The background unit (protocol service, announce, battery report) is at most 610 us with
@@ -164,15 +165,15 @@ is not built.
 
 What protects the motors, and how each is checked:
 
-| Rule | How it holds | Checked by |
-| --- | --- | --- |
-| Motors run every pass before any mapping work | `readUSB()` and the drive calls stay first; `pump()` moves after them | review of `loop()` (the order is in `main.cpp`); `test_scheduler` checks the rule in `Runtime` |
-| A pass's mapping work is under 1 ms | section 3, enforced by the timing suites (`SM_TIMING_REPORT_ONLY` removed) | `pio test -e simavr` |
-| The mapping never waits | no busy-waits outside `setup()`; EEPROM, UART and queue checks all return | existing tests, review |
-| The mapping never touches Serial2 or motor state | `lib/ShadowMap` has no Arduino dependency; `main.cpp` glue only | review |
-| Interrupts are off only briefly | `sm::Uart1`'s atomic blocks are a few instructions each; nothing new adds any | review |
-| No debug output stalls the loop | `SHADOW_VERBOSE` off (below) | the build; `config.h` |
-| RAM stays safe | static SRAM grows by at most 64 bytes over 1969 (the build with `SHADOW_VERBOSE` off), limit 2033; measured 2018 (round 2; 2028 since raw commands) | the build's RAM line, recorded in the design doc |
+| Rule                                             | How it holds                                                                                                                                        | Checked by                                                                                     |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Motors run every pass before any mapping work    | `readUSB()` and the drive calls stay first; `pump()` moves after them                                                                               | review of `loop()` (the order is in `main.cpp`); `test_scheduler` checks the rule in `Runtime` |
+| A pass's mapping work is under 1 ms              | section 3, enforced by the timing suites (`SM_TIMING_REPORT_ONLY` removed)                                                                          | `pio test -e simavr`                                                                           |
+| The mapping never waits                          | no busy-waits outside `setup()`; EEPROM, UART and queue checks all return                                                                           | existing tests, review                                                                         |
+| The mapping never touches Serial2 or motor state | `lib/ShadowMap` has no Arduino dependency; `main.cpp` glue only                                                                                     | review                                                                                         |
+| Interrupts are off only briefly                  | `sm::Uart1`'s atomic blocks are a few instructions each; nothing new adds any                                                                       | review                                                                                         |
+| No debug output stalls the loop                  | `SHADOW_VERBOSE` off (below)                                                                                                                        | the build; `config.h`                                                                          |
+| RAM stays safe                                   | static SRAM grows by at most 64 bytes over 1969 (the build with `SHADOW_VERBOSE` off), limit 2033; measured 2018 (round 2; 2028 since raw commands) | the build's RAM line, recorded in the design doc                                               |
 
 **Found while checking: blocking debug output. Owner's decision (2026-10-02): turn `SHADOW_VERBOSE` off.** With it
 on (`include/config.h`), every press, ramp step and battery change adds a line to `output`, and `printOutput()` hands
@@ -184,8 +185,8 @@ so turning it off changes nothing else. Nothing reads the verbose text: DroidNet
 verbose string.
 
 With it off, the only thing that still writes to `output` in `loop()` is a USB `@SM` reply (bench only, 128-byte
-rule, at most about 5.5 ms while someone has the USB port open). That stays as it is. For the bench check in
-`WIPDocs/HANDOFF_BUTTON_MAP.md` that read `ACTIVATED:` lines, use `shadowmap.py --usb` with `EVENTS 1` (the PRESS
+rule, at most about 5.5 ms while someone has the USB port open). That stays as it is. For a bench check that
+used to read `ACTIVATED:` lines, use `shadowmap.py --usb` with `EVENTS 1` (the PRESS
 events carry the same slot, key and source), or turn `SHADOW_VERBOSE` back on for that session.
 
 ## 8. Testing
@@ -201,7 +202,7 @@ events carry the same slot, key and source), or turn `SHADOW_VERBOSE` back on fo
   dropped; while a command waits, no reply is queued.
 - EEPROM step: a write over fully matching bytes reads at most 4 per step and ends with the same EEPROM image,
   verify and reply.
-- `SHADOW_VERBOSE` off: the firmware builds without warnings, and the HANDOFF_BUTTON_MAP bench step is updated.
+- `SHADOW_VERBOSE` off: the firmware builds without warnings.
 - Transcripts: every stream identical to `0a8b73f` except the differences listed in section 3, each named in
   `test_transcripts.py` (round 2; since 2026-10-03 the goldens are `tools/shadowmap/golden/v4`).
 - All of: `pio run`, `pio test -e native`, `pio test -e simavr --without-uploading`,

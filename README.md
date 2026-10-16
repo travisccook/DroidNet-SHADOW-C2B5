@@ -126,7 +126,7 @@ SHADOW drops any controller it doesn't know and stops the motors. To allow one:
    ```
    @SM MAC F 00:1A:2B:3C:4D:05
    ```
-   SHADOW answers `@SM OK MAC F 00:1A:2B:3C:4D:05`.
+   SHADOW answers `@SM OK MAC F 00:1A:2B:3C:4D:05 *…`.
 4. Press PS again: the controller connects and its light stays on.
 5. Then the dome controller, the same way with `D`. **Connect the foot controller first:** SHADOW gives the first controller that connects the foot's place, so a dome controller connecting first is refused as `F`.
 
@@ -193,8 +193,7 @@ The mapping protocol also works on the USB port for bench testing: type `@SM DUM
 - `test/`: unit tests for the computer and for an emulated Mega
 - `tools/shadowmap/`: a reference DroidNet-side client and command line, and their tests
 - `docs/images/`: the screenshots in this README
-- `WIPDocs/`: design notes and working logs from development
-- `Reference/`: the original SHADOW and SHADOW+MD sketches, and C2-B5's old pinout and control mapping. Kept as history; it's out of date (the pinout still shows MarcDuino on Serial1 and the HCR on Serial3).
+- `WIPDocs/`: design notes: the button map and `@SM` protocol, the allowed controllers, and the timing rules. Older plans, handoffs and the original SHADOW sketches are in the git history.
 
 ## Credits
 
