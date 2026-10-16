@@ -110,6 +110,22 @@ bool slotRecordValid(const uint8_t *rec, uint8_t slot, uint16_t gen) {
     return true;
 }
 
+uint16_t macCrc(uint8_t index, const uint8_t *rec) {
+    return crc16Block(crc16Block(kCrc16Init, &index, 1), rec, 1 + kMacLen);
+}
+
+// A controller-address record: state Address with a usable address, or state None, under its CRC.
+// Anything else (erased, torn, unknown state) reads as not set.
+bool macRecordValid(const uint8_t *rec, uint8_t index) {
+    const uint8_t state = rec[0];
+    if (state != static_cast<uint8_t>(MapStore::MacState::Address) &&
+        state != static_cast<uint8_t>(MapStore::MacState::None))
+        return false;
+    if (get16(rec + 1 + kMacLen) != macCrc(index, rec))
+        return false;
+    return state == static_cast<uint8_t>(MapStore::MacState::None) || macUsable(rec + 1);
+}
+
 // A record's (or a job's) name field as text, with the raw flag cleared and reported.
 void readName(const uint8_t *name, char out[kKeyBuf], bool *raw) {
     memcpy(out, name, kKeyBuf);
@@ -169,6 +185,14 @@ MapStore::MapStore(EepromIo &io, const DefaultMapping *defaults, uint8_t default
 }
 
 void MapStore::begin() {
+    // The controller addresses first: they don't depend on the header, so an unformatted map
+    // (the early return below) still has them.
+    for (uint8_t i = 0; i < kMacSlots; ++i) {
+        while (!io_.ready()) {
+        }
+        loadMac(i);
+    }
+
     uint8_t hdr[kHeaderSize];
     bool valid[2] = {false, false};
     uint16_t seqs[2] = {0, 0};
@@ -265,6 +289,50 @@ void MapStore::loadTap(uint8_t slot) {
     uint8_t rec[kSlotSize];
     io_.readBlock(slotAddr(slot), rec, kSlotSize);
     setTapMapped(slot, slotRecordValid(rec, slot, gen_) ? rec[0] != 0 : defaultMapped(slot));
+}
+
+void MapStore::loadMac(uint8_t index) {
+    uint8_t rec[kMacRecordSize];
+    io_.readBlock(macAddr(index), rec, kMacRecordSize);
+    if (!macRecordValid(rec, index)) {
+        macState_[index] = MacState::NotSet;
+        return;
+    }
+    macState_[index] = static_cast<MacState>(rec[0]);
+    memcpy(mac_[index], rec + 1, kMacLen);
+}
+
+void MapStore::setBuiltInMac(uint8_t index, const uint8_t *mac) {
+    if (index >= kMacSlots)
+        return;
+    builtInSet_[index] = mac != nullptr && macUsable(mac);
+    if (builtInSet_[index])
+        memcpy(builtIn_[index], mac, kMacLen);
+}
+
+bool MapStore::macFor(uint8_t index, uint8_t out[kMacLen], Source *src) const {
+    if (index >= kMacSlots)
+        return false;
+    const MacState state = macState_[index];
+    if (src != nullptr)
+        *src = state == MacState::NotSet ? Source::Default : Source::Eeprom;
+    if (state == MacState::Address) {
+        memcpy(out, mac_[index], kMacLen);
+        return true;
+    }
+    if (state == MacState::None || !builtInSet_[index])
+        return false;
+    memcpy(out, builtIn_[index], kMacLen);
+    return true;
+}
+
+bool MapStore::macAllows(Ctrl role, const uint8_t bdaddr[kMacLen]) const {
+    uint8_t mac[kMacLen];
+    for (uint8_t i = static_cast<uint8_t>(role); i < kMacSlots; i = static_cast<uint8_t>(i + 2)) {
+        if (macFor(i, mac) && macMatches(mac, bdaddr))
+            return true;
+    }
+    return false;
 }
 
 void MapStore::applyHeader(const uint8_t *hdr, uint8_t index) {
@@ -406,6 +474,31 @@ MapStore::Result MapStore::beginSuffix(const char *suffix) {
     return beginHeaderChange(gen_, prefix_, suffix);
 }
 
+MapStore::Result MapStore::beginMac(uint8_t index, MacState state, const uint8_t *mac) {
+    if (busy())
+        return Result::Busy;
+    if (index >= kMacSlots || (state == MacState::Address && (mac == nullptr || !macUsable(mac))))
+        return Result::BadArg;
+    if (state == MacState::NotSet) {
+        memset(jobData_, 0xFF, kMacRecordSize);  // erased: reads as not set
+    } else {
+        memset(jobData_, 0, kMacRecordSize);
+        jobData_[0] = static_cast<uint8_t>(state);
+        if (state == MacState::Address)
+            memcpy(jobData_ + 1, mac, kMacLen);
+        put16(jobData_ + 1 + kMacLen, macCrc(index, jobData_));
+    }
+    completion_ = Completion::None;
+    kind_ = JobKind::Mac;
+    jobIndex_ = index;
+    jobAddr_ = macAddr(index);
+    jobLen_ = kMacRecordSize;
+    jobPos_ = 0;
+    retries_ = 0;
+    phase_ = Phase::Write;
+    return Result::Ok;
+}
+
 void MapStore::startHeaderJob(uint8_t index, uint16_t seq, uint16_t gen, const char *prefix, const char *suffix) {
     memset(jobData_, 0, sizeof(jobData_));
     jobData_[kHdrMagic0] = 'S';
@@ -492,6 +585,12 @@ void MapStore::step() {
 
 void MapStore::finishJob(bool ok) {
     phase_ = Phase::Idle;
+    if (kind_ == JobKind::Mac) {
+        loadMac(jobIndex_);  // what's really there now, written or not (the EEPROM is idle: step() checked)
+        ++macChanges_;
+        completion_ = ok ? Completion::Done : Completion::Failed;
+        return;
+    }
     if (kind_ == JobKind::Header) {
         if (!ok) {
             pendingSlot_ = kNoSlot;

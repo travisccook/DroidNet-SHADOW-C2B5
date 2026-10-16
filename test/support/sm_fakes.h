@@ -17,7 +17,7 @@
 // has 8 KB). Writing more than that counts as a violation.
 class FakeEeprom final : public sm::EepromIo {
   public:
-    static constexpr uint16_t kSize = sm::MapStore::kFootprint;
+    static constexpr uint16_t kSize = sm::MapStore::kEepromUsed;  // the mapping and the controller-address records
     static constexpr uint16_t kFlat = 2 * sm::MapStore::kHeaderSize + sm::kSingleSlotCount * sm::MapStore::kSlotSize;
     static constexpr uint8_t kPoolRecords = 6;
 
@@ -86,8 +86,16 @@ class FakeEeprom final : public sm::EepromIo {
     uint8_t peek(uint16_t addr) const {
         if (addr < kFlat)
             return mem[addr];
+        if (addr >= sm::MapStore::kFootprint)
+            return macMem[addr - sm::MapStore::kFootprint];
         const Record *r = find(recordOf(addr));
         return r != nullptr ? r->bytes[(addr - kFlat) % sm::MapStore::kSlotSize] : 0xFF;
+    }
+    // Stores a byte directly, for tests that damage a record.
+    void poke(uint16_t addr, uint8_t value) {
+        uint8_t *cell = cellFor(addr);
+        if (cell != nullptr)
+            *cell = value;
     }
     uint8_t doubleRecordsUsed() const {
         uint8_t n = 0;
@@ -97,6 +105,7 @@ class FakeEeprom final : public sm::EepromIo {
     }
 
     uint8_t mem[kFlat];  // headers and single-press slots
+    uint8_t macMem[sm::MapStore::kMacFootprint];  // the controller-address records
     uint8_t busy = 0;
     uint8_t writeTicks = 3;
     int32_t budget = -1;  // writes left before the power cut; -1 = no cut
@@ -124,6 +133,8 @@ class FakeEeprom final : public sm::EepromIo {
     uint8_t *cellFor(uint16_t addr) {
         if (addr < kFlat)
             return &mem[addr];
+        if (addr >= sm::MapStore::kFootprint)
+            return &macMem[addr - sm::MapStore::kFootprint];
         const uint8_t record = recordOf(addr);
         Record *r = const_cast<Record *>(find(record));
         for (uint8_t i = 0; r == nullptr && i < kPoolRecords; ++i) {
@@ -137,6 +148,7 @@ class FakeEeprom final : public sm::EepromIo {
     }
     void erase() {
         memset(mem, 0xFF, sizeof(mem));
+        memset(macMem, 0xFF, sizeof(macMem));
         for (Record &r : pool)
             r.record = kFree;
     }

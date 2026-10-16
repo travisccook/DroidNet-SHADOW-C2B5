@@ -6,6 +6,10 @@
 //   216 slots x 18 B                   stored-command key (NUL-padded), or a raw command with
 //                                      bit 7 of its first byte set, + CRC16 over (layout
 //                                      version, generation, slot index, the 16 name bytes)
+//   4 controller addresses x 9 B        from base + 3952: state, address (most significant
+//                                       byte first), CRC16 over (index, state, address); see
+//                                       WIPDocs/CONTROLLER_ADDRESSES_DESIGN.md. Independent of
+//                                       the header: no generation, so DEFAULTS leaves them.
 //
 // The 72 double-tap slots (72-143) follow the 72 single-press slots, which end at 1360, and
 // the 72 long-press slots (144-215) follow the double taps, from 2656. The header's slot count
@@ -28,6 +32,7 @@
 #include <stdint.h>
 
 #include "sm_eeprom.h"
+#include "sm_mac.h"
 #include "sm_slots.h"
 
 namespace sm {
@@ -72,6 +77,13 @@ class MapStore {
     // Bytes the write phase reads in one step() before it returns: a step over bytes that already
     // hold the right value stays short (about 5 us a byte on the Mega), and the next step carries on.
     static constexpr uint8_t kMaxReadsPerStep = 4;
+    static constexpr uint8_t kMacRecordSize = 1 + kMacLen + 2;  // state, address, CRC16
+    static constexpr uint16_t kMacFootprint = static_cast<uint16_t>(kMacSlots) * kMacRecordSize;
+    static constexpr uint16_t kEepromUsed = kFootprint + kMacFootprint;  // 3988
+
+    // A controller-address record's state. NotSet is never stored: an erased or damaged record
+    // reads as it, and the slot uses the build's address.
+    enum class MacState : uint8_t { NotSet = 0, Address = 1, None = 2 };
 
     enum class Result : uint8_t { Ok, Busy, BadSlot, Reserved, BadKey, BadArg };
     enum class Completion : uint8_t { None, Done, Failed };
@@ -102,12 +114,31 @@ class MapStore {
     // The same for the long press of `slot` (its single-press or its long-press index).
     bool longPressMapped(uint8_t slot) const;
 
+    // The build's address for a controller slot (MacSlot), or nullptr (or an unusable address) for
+    // none. Call from setup(), after begin().
+    void setBuiltInMac(uint8_t index, const uint8_t *mac);
+
+    // The address in force for a controller slot: its EEPROM record's, else the build's. False, with
+    // `out` untouched, when the slot has no controller. `*src` is Eeprom when a record decides (an
+    // address, or "no controller"), Default when the build does. Kept in RAM: never waits.
+    bool macFor(uint8_t index, uint8_t out[kMacLen], Source *src = nullptr) const;
+
+    // Whether the controller at `bdaddr` (Btd.disc_bdaddr, least significant byte first) may connect
+    // as `role`: Ctrl::F checks slots F and F2, Ctrl::D slots D and D2.
+    bool macAllows(Ctrl role, const uint8_t bdaddr[kMacLen]) const;
+
+    // Counts finished controller-address writes, so a caller can tell the list may have changed.
+    uint8_t macChanges() const { return macChanges_; }
+
     // Start a write. Only one runs at a time; watch takeCompletion() for the outcome.
     Result beginSet(uint8_t slot, const char *key, bool raw = false);  // "" clears the slot; raw: a raw command
     Result beginRevert(uint8_t slot);                // back to the built-in default
     Result beginDefaults();
     Result beginPrefix(const char *prefix);
     Result beginSuffix(const char *suffix);
+    // A controller slot's record: an address, "no controller" (MacState::None, `mac` ignored), or
+    // back to the build's (MacState::NotSet: the record is erased).
+    Result beginMac(uint8_t index, MacState state, const uint8_t *mac);
 
     bool busy() const { return phase_ != Phase::Idle || pendingSlot_ != kNoSlot; }
     // The next step() verifies the job's record and, if it's good, finishes the job (the heavy
@@ -126,12 +157,16 @@ class MapStore {
     static constexpr uint8_t kMaxRetries = 1;
 
     enum class Phase : uint8_t { Idle, Write, Verify };
-    enum class JobKind : uint8_t { Header, Slot, SlotErase };
+    enum class JobKind : uint8_t { Header, Slot, SlotErase, Mac };
 
     uint16_t headerAddr(uint8_t index) const { return static_cast<uint16_t>(base_ + index * kHeaderSize); }
     uint16_t slotAddr(uint8_t slot) const {
         return static_cast<uint16_t>(base_ + 2 * kHeaderSize + static_cast<uint16_t>(slot) * kSlotSize);
     }
+    uint16_t macAddr(uint8_t index) const {
+        return static_cast<uint16_t>(base_ + kFootprint + static_cast<uint16_t>(index) * kMacRecordSize);
+    }
+    void loadMac(uint8_t index);  // its EEPROM record into RAM; the EEPROM must be ready
 
     void startHeaderJob(uint8_t index, uint16_t seq, uint16_t gen, const char *prefix, const char *suffix);
     void startSlotJob(uint8_t slot, const char *key, bool raw);
@@ -174,6 +209,11 @@ class MapStore {
     Completion completion_ = Completion::None;
     uint8_t doubleTaps_[(kSingleSlotCount + 7) / 8] = {};  // bit per double-tap slot that maps to a key
     uint8_t longPresses_[(kSingleSlotCount + 7) / 8] = {};  // bit per long-press slot that maps to a key
+    MacState macState_[kMacSlots] = {};  // each record, as loaded (NotSet: use builtIn_)
+    uint8_t mac_[kMacSlots][kMacLen] = {};
+    bool builtInSet_[kMacSlots] = {};
+    uint8_t builtIn_[kMacSlots][kMacLen] = {};
+    uint8_t macChanges_ = 0;
     uint16_t writes_ = 0;
 };
 
