@@ -11,6 +11,7 @@
 #include <stdint.h>
 
 #include "sm_battery.h"
+#include "sm_mac.h"
 #include "sm_out.h"
 #include "sm_store.h"
 #include "sm_tx.h"
@@ -94,9 +95,11 @@ class Protocol {
     bool opInProgress() const { return op_ != Op::None; }
 
   private:
-    enum class Op : uint8_t { None, Set, Revert, Defaults, Prefix, Suffix, Dump, Sum };
+    enum class Op : uint8_t { None, Set, Revert, Defaults, Prefix, Suffix, Dump, Sum, Mac, MacList };
 
     bool sendSlotLine(uint8_t slot, ReplyPort &port);
+    bool handleMac(uint8_t argc, char *const *argv, ReplyPort &port);
+    void sendMacLine(uint8_t index, ReplyPort &port);  // "@SM MAC <S> <address|-> <eeprom|default>"
     void servicePads();
     void sendOpReply(bool ok);
     void startOp(Op op, ReplyPort &port, MapStore::Result r, const char *verb, uint8_t slot);
@@ -115,6 +118,7 @@ class Protocol {
     bool opOk_ = false;
     uint8_t dumpNext_ = 0;  // next slot for DUMP / SUM
     uint32_t sumCrc_ = 0;
+    uint8_t opMac_ = 0;  // MAC: the controller slot; MAC list: the next one
 
     ReplyPort *eventPort_ = nullptr;
     uint8_t pads_ = 0;          // bit 0 foot, bit 1 dome

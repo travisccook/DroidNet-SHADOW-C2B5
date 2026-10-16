@@ -341,6 +341,9 @@ bool Protocol::handleLine(const char *line, ReplyPort &port) {
         return true;
     }
 
+    if (v0 == 'M' && strcmp_P(verb, PSTR("MAC")) == 0)
+        return handleMac(argc, argv, port);
+
     const bool isSet = v0 == 'S' && strcmp_P(verb, PSTR("SET")) == 0;
     const bool isRevert = v0 == 'R' && strcmp_P(verb, PSTR("REVERT")) == 0;
     const bool isSum = v0 == 'S' && strcmp_P(verb, PSTR("SUM")) == 0;
@@ -460,9 +463,83 @@ void Protocol::startOp(Op op, ReplyPort &port, MapStore::Result r, const char *v
             sendError(port, PSTR("key"), verb, slot);
             return;
         case MapStore::Result::BadArg:
-            sendError(port, op == Op::Prefix ? PSTR("prefix") : PSTR("suffix"), verb, slot);
+            sendError(port,
+                      op == Op::Prefix   ? PSTR("prefix")
+                      : op == Op::Suffix ? PSTR("suffix")
+                                         : PSTR("addr"),
+                      verb, slot);
             return;
     }
+}
+
+// MAC [<S> [<address|-|default>]]: the allowed controllers (WIPDocs/CONTROLLER_ADDRESSES_DESIGN.md).
+// The list goes one line a pass, like DUMP; a slot's line is answered at once, like GET; a change
+// is a write, one at a time with the others.
+bool Protocol::handleMac(uint8_t argc, char *const *argv, ReplyPort &port) {
+    const char *verb = argv[0];
+    if (argc == 1) {
+        if (op_ != Op::None) {
+            sendError(port, PSTR("busy"), verb, kNoSlot);
+            return true;
+        }
+        op_ = Op::MacList;
+        opPort_ = &port;
+        opMac_ = 0;
+        return true;
+    }
+    uint8_t index = 0;
+    if (argc > 3 || !parseMacSlot(argv[1], &index)) {
+        sendError(port, PSTR("args"), verb, kNoSlot);
+        return true;
+    }
+    if (argc == 2) {
+        sendMacLine(index, port);  // fits: canSend(kMaxLine) was checked above
+        return true;
+    }
+    const char *arg = argv[2];
+    MapStore::MacState state = MapStore::MacState::Address;
+    uint8_t mac[kMacLen] = {};
+    if (strcmp(arg, "-") == 0) {
+        state = MapStore::MacState::None;
+    } else if (strcmp_P(arg, PSTR("default")) == 0) {
+        state = MapStore::MacState::NotSet;
+    } else if (!parseMac(arg, mac)) {
+        sendError(port, PSTR("addr"), verb, kNoSlot);
+        return true;
+    }
+    if (op_ != Op::None) {
+        sendError(port, PSTR("busy"), verb, kNoSlot);
+        return true;
+    }
+    const MapStore::Result r = store_.beginMac(index, state, mac);
+    if (r == MapStore::Result::Ok) {
+        opMac_ = index;
+        if (state == MapStore::MacState::Address)
+            formatMac(mac, opArg_);  // upper case, however it was typed
+        else
+            strcpy_P(opArg_, state == MapStore::MacState::None ? PSTR("-") : PSTR("default"));
+    }
+    startOp(Op::Mac, port, r, verb, kNoSlot);
+    return true;
+}
+
+void Protocol::sendMacLine(uint8_t index, ReplyPort &port) {
+    uint8_t mac[kMacLen];
+    Source src = Source::Default;
+    const bool has = store_.macFor(index, mac, &src);
+    char slot[3];
+    macSlotToken(index, slot);
+    Out out;
+    out.p(PSTR("@SM MAC ")).s(slot).c(' ');
+    if (has) {
+        char text[kMacTextBuf];
+        formatMac(mac, text);
+        out.s(text);
+    } else {
+        out.c('-');
+    }
+    out.c(' ').p(sourceToken(src));
+    emit(out, port);
 }
 
 void Protocol::service() {
@@ -511,6 +588,15 @@ void Protocol::service() {
         return;
     }
 
+    if (op_ == Op::MacList) {
+        if (!opPort_->canSend(kMaxLine))
+            return;
+        sendMacLine(opMac_, *opPort_);
+        if (++opMac_ >= kMacSlots)
+            op_ = Op::None;
+        return;
+    }
+
     if (!replyPending_) {
         const MapStore::Completion c = store_.takeCompletion();
         if (c == MapStore::Completion::None)
@@ -540,6 +626,9 @@ void Protocol::sendOpReply(bool ok) {
         case Op::Suffix:
             verb = PSTR("SUFFIX");
             break;
+        case Op::Mac:
+            verb = PSTR("MAC");
+            break;
         default:
             break;
     }
@@ -548,6 +637,11 @@ void Protocol::sendOpReply(bool ok) {
         out.p(PSTR("@SM ERR eeprom ")).p(verb);
         if (op_ == Op::Set || op_ == Op::Revert)
             out.c(' ').slot(opSlot_);
+        if (op_ == Op::Mac) {
+            char slot[3];
+            macSlotToken(opMac_, slot);
+            out.c(' ').s(slot);
+        }
         emit(out, *opPort_);
         return;
     }
@@ -558,7 +652,11 @@ void Protocol::sendOpReply(bool ok) {
         out.c(' ').slot(opSlot_);
     else if (op_ == Op::Defaults)
         out.p(PSTR(" gen=")).u(store_.generation());
-    else
+    else if (op_ == Op::Mac) {
+        char slot[3];
+        macSlotToken(opMac_, slot);
+        out.c(' ').s(slot).c(' ').s(opArg_);
+    } else
         out.c(' ').s(opArg_);
     emit(out, *opPort_);
 }
