@@ -12,19 +12,27 @@
 // ---------------------------------------------------------------------------------------
 //                          PS3 Controller MAC Addresses
 // ---------------------------------------------------------------------------------------
-// The addresses live in include/controller_macs.h, which is gitignored. Copy
-// include/controller_macs.example.h to include/controller_macs.h and set your own.
+// The addresses live in include/controller_macs.h, which is gitignored and optional: copy
+// include/controller_macs.example.h to it to build your addresses in, or leave it out and allow
+// your controllers with "@SM MAC" after flashing (README, "Allow your controllers").
 
 #if __has_include("../include/controller_macs.h")
 #include "../include/controller_macs.h"
-#else
-#error "Missing include/controller_macs.h: copy include/controller_macs.example.h to include/controller_macs.h and set your PS3 controller MAC addresses."
+#endif
+#ifndef PS3_FOOT_MAC
+#define PS3_FOOT_MAC ""
+#endif
+#ifndef PS3_DOME_MAC
+#define PS3_DOME_MAC ""
+#endif
+#ifndef PS3_BACKUP_FOOT_MAC
+#define PS3_BACKUP_FOOT_MAC ""
+#endif
+#ifndef PS3_BACKUP_DOME_MAC
+#define PS3_BACKUP_DOME_MAC ""
 #endif
 
-String PS3ControllerFootMac = PS3_FOOT_MAC;               // FOOT PS3 controller MAC address
-String PS3ControllerDomeMAC = PS3_DOME_MAC;               // Secondary DOME PS3 controller MAC address (Optional)
-String PS3ControllerBackupFootMac = PS3_BACKUP_FOOT_MAC;  // BACKUP FOOT controller MAC address (Optional)
-String PS3ControllerBackupDomeMAC = PS3_BACKUP_DOME_MAC;  // BACKUP DOME controller MAC address (Optional)
+const char controllerMacs[4][18] PROGMEM = {PS3_FOOT_MAC, PS3_DOME_MAC, PS3_BACKUP_FOOT_MAC, PS3_BACKUP_DOME_MAC};
 
 // ---------------------------------------------------------------------------------------
 //                          Drive System Configuration

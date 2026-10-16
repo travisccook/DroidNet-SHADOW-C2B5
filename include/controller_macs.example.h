@@ -5,10 +5,11 @@
 //                          PS3 Controller MAC Addresses (template)
 // =======================================================================================
 //
-// Copy this file to include/controller_macs.h and replace the placeholders with your
+// Optional. Copy this file to include/controller_macs.h and replace the placeholders with your
 // controllers' Bluetooth addresses (uppercase, two digits a byte, colon-separated, as in
-// "00:1A:2B:3C:4D:05"). controller_macs.h is
-// gitignored so your addresses stay out of the repository.
+// "00:1A:2B:3C:4D:05") to build them in. controller_macs.h is gitignored so your addresses stay
+// out of the repository. Without it, the firmware allows no controller until you add one with
+// "@SM MAC" (README, "Allow your controllers"); an address added that way overrides this file's.
 //
 // A controller may connect only if its address matches one of these. Any other
 // controller is dropped and the motors are stopped. Leave an unused slot as the

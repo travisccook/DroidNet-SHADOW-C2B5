@@ -51,10 +51,11 @@
 //                          PS3 Controller MAC Addresses
 // ---------------------------------------------------------------------------------------
 
-extern String PS3ControllerFootMac;      // Primary FOOT PS3 controller MAC address
-extern String PS3ControllerDomeMAC;      // Primary DOME PS3 controller MAC address (Optional)
-extern String PS3ControllerBackupFootMac; // Backup FOOT controller MAC address (Optional)
-extern String PS3ControllerBackupDomeMAC; // Backup DOME controller MAC address (Optional)
+// The build's allowed controllers, in the order F (foot), D (dome), F2, D2 (backups), from
+// include/controller_macs.h when it exists. Text that isn't an address (the template's
+// "XX:XX:XX:XX:XX:XX", or "") means none. Addresses set with "@SM MAC" (kept in EEPROM) take
+// precedence; see WIPDocs/CONTROLLER_ADDRESSES_DESIGN.md.
+extern const char controllerMacs[4][18] PROGMEM;
 
 // ---------------------------------------------------------------------------------------
 //                          Drive System Configuration

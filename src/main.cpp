@@ -124,6 +124,9 @@
 
 void onInitPS3NavFoot();
 void onInitPS3NavDome();
+void dropFoot();
+void dropDome();
+void checkRevoked();
 String getLastConnectedBtMAC();
 boolean criticalFaultDetect();
 boolean readUSB();
@@ -217,6 +220,12 @@ sm::LineReader usbLines;
 // Serial1 as the mapping's per-pass work reaches it (include/sm_uart_avr.h): HardwareSerial's own
 // buffers without a virtual call per byte. setup()'s direct Serial1 prints are unchanged.
 sm::Uart1 wcbUart;
+
+// The connected controllers' addresses (Btd.disc_bdaddr order), kept so an "@SM MAC" change that
+// revokes one can drop it (checkRevoked()).
+uint8_t footBdaddr[sm::kMacLen] = {};
+uint8_t domeBdaddr[sm::kMacLen] = {};
+uint8_t macChangesSeen = 0;
 
 // Replies to "@SM" requests typed on the USB port go out with the debug output. A reply waits
 // until `output` is nearly empty, so printOutput()'s write stays short (the UART buffer holds
@@ -399,6 +408,16 @@ void setup() {
 
     // Button mapping: reads the EEPROM headers once; everything after this is non-blocking.
     mapStore.begin();
+    // Allowed controllers: the build's addresses (include/controller_macs.h, if any), under those
+    // set with @SM MAC (EEPROM). Refusals are reported on the USB port as "@SM REFUSED".
+    for (uint8_t i = 0; i < sm::kMacSlots; ++i) {
+        char text[sm::kMacTextBuf];
+        strncpy_P(text, controllerMacs[i], sizeof(text) - 1);
+        text[sizeof(text) - 1] = '\0';
+        uint8_t mac[sm::kMacLen];
+        mapStore.setBuiltInMac(i, sm::parseMac(text, mac) ? mac : nullptr);
+    }
+    mapProtocol.setConsole(usbReplies);
 #ifdef SHADOW_VERBOSE
     output += "\r\nButton mapping: ";
     if (mapStore.formatted()) {
@@ -961,46 +980,64 @@ void autoDome() {
 //           PPS3 Controller Device Mgt Functions
 // =======================================================================================
 
+// Drops the foot controller and stops the motors: a controller that isn't allowed, at connection or
+// after an @SM MAC change.
+void dropFoot() {
+    ST->stop();
+    SyR->stop();
+    isFootMotorStopped = true;
+    footDriveSpeed = 0;
+    PS3NavFoot->setLedOff(LED1);
+    PS3NavFoot->disconnect();
+#ifdef SHADOW_DEBUG
+    printOutput();
+#endif
+    isPS3NavigatonInitialized = false;
+    mainControllerConnected = false;
+}
+
+void dropDome() {
+    ST->stop();
+    SyR->stop();
+    isFootMotorStopped = true;
+    footDriveSpeed = 0;
+    PS3NavDome->setLedOff(LED1);
+    PS3NavDome->disconnect();
+#ifdef SHADOW_DEBUG
+    printOutput();
+#endif
+    isSecondaryPS3NavigatonInitialized = false;
+    domeControllerConnected = false;
+}
+
 void onInitPS3NavFoot() {
 #ifdef SHADOW_DEBUG
     Serial.println(F("\r\n*** onInitPS3NavFoot CALLED ***"));
 #endif
 
-    String btAddress = getLastConnectedBtMAC();
     PS3NavFoot->setLedOn(LED1);
     isPS3NavigatonInitialized = true;
     badPS3Data = 0;
 
 #ifdef SHADOW_DEBUG
     output += "\r\nBT Address of Last connected Device when FOOT PS3 Connected: ";
-    output += btAddress;
+    output += getLastConnectedBtMAC();
 #endif
 
-    if (btAddress == PS3ControllerFootMac || btAddress == PS3ControllerBackupFootMac) {
+    if (mapStore.macAllows(sm::Ctrl::F, Btd.disc_bdaddr)) {
 #ifdef SHADOW_DEBUG
         output += "\r\nWe have our FOOT controller connected.\r\n";
 #endif
-
+        memcpy(footBdaddr, Btd.disc_bdaddr, sm::kMacLen);
         mainControllerConnected = true;
         WaitingforReconnect = true;
     } else {
-// Prevent connection from anything but the MAIN controllers
+// Prevent connection from anything but the allowed controllers
 #ifdef SHADOW_DEBUG
         output += "\r\nWe have an invalid controller trying to connect as tha FOOT controller, it will be dropped.\r\n";
 #endif
-
-        ST->stop();
-        SyR->stop();
-        isFootMotorStopped = true;
-        footDriveSpeed = 0;
-        PS3NavFoot->setLedOff(LED1);
-        PS3NavFoot->disconnect();
-#ifdef SHADOW_DEBUG
-        printOutput();
-#endif
-
-        isPS3NavigatonInitialized = false;
-        mainControllerConnected = false;
+        mapProtocol.noteRefused(sm::Ctrl::F, Btd.disc_bdaddr);
+        dropFoot();
     }
 }
 
@@ -1009,37 +1046,37 @@ void onInitPS3NavDome() {
     Serial.println(F("\r\n*** onInitPS3NavDome CALLED ***"));
 #endif
 
-    String btAddress = getLastConnectedBtMAC();
     PS3NavDome->setLedOn(LED1);
     isSecondaryPS3NavigatonInitialized = true;
     badPS3Data = 0;
 
-    if (btAddress == PS3ControllerDomeMAC || btAddress == PS3ControllerBackupDomeMAC) {
+    if (mapStore.macAllows(sm::Ctrl::D, Btd.disc_bdaddr)) {
 #ifdef SHADOW_DEBUG
         output += "\r\nWe have our DOME controller connected.\r\n";
 #endif
-
+        memcpy(domeBdaddr, Btd.disc_bdaddr, sm::kMacLen);
         domeControllerConnected = true;
         WaitingforReconnectDome = true;
     } else {
-// Prevent connection from anything but the DOME controllers
+// Prevent connection from anything but the allowed controllers
 #ifdef SHADOW_DEBUG
         output += "\r\nWe have an invalid controller trying to connect as the DOME controller, it will be dropped.\r\n";
 #endif
-
-        ST->stop();
-        SyR->stop();
-        isFootMotorStopped = true;
-        footDriveSpeed = 0;
-        PS3NavDome->setLedOff(LED1);
-        PS3NavDome->disconnect();
-#ifdef SHADOW_DEBUG
-        printOutput();
-#endif
-
-        isSecondaryPS3NavigatonInitialized = false;
-        domeControllerConnected = false;
+        mapProtocol.noteRefused(sm::Ctrl::D, Btd.disc_bdaddr);
+        dropDome();
     }
+}
+
+// An @SM MAC change that no longer allows a connected controller drops it, as a refused connection
+// is dropped: motors stopped, controller disconnected. Once a pass, before the motors are driven.
+void checkRevoked() {
+    if (mapStore.macChanges() == macChangesSeen)
+        return;
+    macChangesSeen = mapStore.macChanges();
+    if (mainControllerConnected && !mapStore.macAllows(sm::Ctrl::F, footBdaddr))
+        dropFoot();
+    if (domeControllerConnected && !mapStore.macAllows(sm::Ctrl::D, domeBdaddr))
+        dropDome();
 }
 
 String getLastConnectedBtMAC() {
@@ -1432,6 +1469,7 @@ void loop() {
         return;
     }
 
+    checkRevoked();
     footMotorDrive();
     domeDrive();
     const bool fired = mappedButtons();
