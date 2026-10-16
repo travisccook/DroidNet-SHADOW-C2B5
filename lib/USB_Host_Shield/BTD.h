@@ -487,6 +487,13 @@ public:
         uint16_t hci_handle;
         /** Last incoming devices Bluetooth address. */
         uint8_t disc_bdaddr[6];
+        /**
+         * The Bluetooth address from the last successful Connection Complete event: the device
+         * hci_handle belongs to (SHADOW addition). Services copy it with the handle when they claim
+         * a connection; disc_bdaddr changes with every incoming connection request, so it can name
+         * another device by the time a service checks who it's talking to.
+         */
+        uint8_t connect_bdaddr[6];
         /** First 30 chars of last remote name. */
         char remote_name[30];
         /**

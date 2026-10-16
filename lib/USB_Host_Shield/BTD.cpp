@@ -487,6 +487,10 @@ void BTD::HCI_event_task() {
                                         Notify(PSTR("\r\nConnection established"), 0x80);
 #endif
                                         hci_handle = hcibuf[3] | ((hcibuf[4] & 0x0F) << 8); // Store the handle for the ACL connection
+                                        // SHADOW addition: the address beside the handle (status 1 byte, handle 2, BD_ADDR 6,
+                                        // least significant byte first, as disc_bdaddr)
+                                        for(uint8_t i = 0; i < 6; i++)
+                                                connect_bdaddr[i] = hcibuf[5 + i];
                                         hci_set_flag(HCI_FLAG_CONNECT_COMPLETE); // Set connection complete flag
                                 } else {
                                         hci_state = HCI_CHECK_DEVICE_SERVICE;

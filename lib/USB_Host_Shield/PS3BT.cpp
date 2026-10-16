@@ -232,6 +232,8 @@ void PS3BT::ACLData(uint8_t* ACLData) {
                                 pBtd->l2capConnectionClaimed = true; // Claim that the incoming connection belongs to this service
                                 activeConnection = true;
                                 hci_handle = pBtd->hci_handle; // Store the HCI Handle for the connection
+                                for(uint8_t i = 0; i < 6; i++)
+                                        bdaddr[i] = pBtd->connect_bdaddr[i]; // SHADOW addition: and the address that came with it
                                 l2cap_state = L2CAP_WAIT;
                                 for(uint8_t i = 0; i < 30; i++)
                                         remote_name[i] = pBtd->remote_name[i]; // Store the remote name for the connection

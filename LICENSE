@@ -32,8 +32,9 @@ These keep their own licenses, which apply to the files in their folders:
 
 - lib/USB_Host_Shield: USB Host Shield 2.0 library, Copyright (C) 2011 Circuits At Home,
   LTD. and Copyright (C) 2012 Kristian Lauszus, TKJ Electronics. GNU General Public
-  License version 2; see lib/USB_Host_Shield/gpl2.txt. SHADOW's one change to it
-  (PS3BT::getBatteryStatus()) is under the same license.
+  License version 2; see lib/USB_Host_Shield/gpl2.txt. SHADOW's changes to it
+  (PS3BT::getBatteryStatus(), PS3BT::getBdaddr() and BTD::connect_bdaddr) are under the
+  same license.
 
 - lib/Sabertooth: Arduino Libraries for SyRen/Sabertooth, Copyright (c) 2012-2013
   Dimension Engineering LLC; see lib/Sabertooth/license.txt.

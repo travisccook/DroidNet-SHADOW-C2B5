@@ -2169,6 +2169,14 @@ Expected: `build/release/SHADOWC2B5_<commit>.hex`, no `FOUND`. This is the exact
 
 Follow `WIPDocs/HANDOFF_2026-09-23_shadow_wdp_device_announce.md`, "Flashing SHADOW", steps 2, 3 and 5: motor power off and wheels up, the USB power check, then the `avrdude` dump over SSH on c2-body to `/root/shadow-backups/shadow-pre-macs-<date>.hex` with its `sha256sum`. Copy the candidate to c2-body with `scp -O`.
 
+- [ ] **Step 2b: Reproduce the address race on the current firmware (RED for the final review's fix)**
+
+With the firmware C2-B5 runs now, wheels up: turn both controllers off, then press PS on the dome controller and,
+within about a second, on the foot controller. Note which controller drives the feet and which is dropped. The
+final review found that the connect check read `Btd.disc_bdaddr`, which the second controller's connection
+request overwrites before the first one's `onInit` runs, so the dome controller can end up driving the feet.
+Repeat a few times; record what was seen.
+
 - [ ] **Step 3: Flash through DroidNet's Firmware tab**
 
 On the Signal Booster's web page: Firmware tab, the Mega ADK device, the candidate `.hex`, Board Type **Arduino Mega**, Flash. Record the console's last lines (success and verify).
@@ -2183,6 +2191,13 @@ On the Signal Booster's web page: Firmware tab, the Mega ADK device, the candida
 6. Close the Serial tab. In the SHADOW tab, check the link is Live and the map is in sync (the button map is untouched).
 7. Drive check, wheels up: foot drive, dome, a few mapped buttons.
 8. Add the backups if the owner has them (`F2`, `D2`), the same way.
+9. The race from Step 2b (GREEN): both controllers off, PS on the dome, then the foot within about a second. Expect the
+   dome controller refused as `F` (`REFUSED F <its own address>`) and only the foot controller driving the feet; then
+   the dome connects as the dome on its next PS.
+10. Revoke a controller that is off: `@SM MAC D -` with the dome controller off, then press PS on it: refused. Put it
+    back. Expect no effect on the foot controller.
+11. Revoke while driving (wheels up, foot stick held): `@SM MAC F -`. Expect the feet to stop at once and the foot
+    controller dropped. Put it back.
 
 If any check fails, roll back over SSH with the Step 2 dump (`avrdude ... -D -U flash:w:<dump>:i`) and stop.
 

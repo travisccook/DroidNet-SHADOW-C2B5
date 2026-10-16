@@ -196,6 +196,17 @@ public:
         };
 
         /**
+         * The Bluetooth address of the controller on this connection (SHADOW addition), least
+         * significant byte first as BTD::disc_bdaddr, copied with the HCI handle when the
+         * connection was claimed. Unlike BTD::disc_bdaddr, a later incoming connection doesn't
+         * change it, so it is still this controller's when onInit runs.
+         * @return Six bytes, or all zero before the first connection.
+         */
+        const uint8_t *getBdaddr() const {
+                return bdaddr;
+        };
+
+        /**
          * Used to call your own function when the controller is successfully initialized.
          * @param funcOnInit Function to call.
          */
@@ -236,6 +247,7 @@ private:
 
         uint32_t lastMessageTime; // Variable used to store the millis value of the last message.
         uint8_t batteryStatus; // Battery byte of the last input report; 0 = none yet (SHADOW addition)
+        uint8_t bdaddr[6] = {}; // This connection's controller address (SHADOW addition, see getBdaddr())
 
         unsigned long timer;
 

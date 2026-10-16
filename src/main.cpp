@@ -221,8 +221,10 @@ sm::LineReader usbLines;
 // buffers without a virtual call per byte. setup()'s direct Serial1 prints are unchanged.
 sm::Uart1 wcbUart;
 
-// The connected controllers' addresses (Btd.disc_bdaddr order), kept so an "@SM MAC" change that
-// revokes one can drop it (checkRevoked()).
+// The connected controllers' addresses (least significant byte first, as PS3BT::getBdaddr()), kept
+// so an "@SM MAC" change that revokes one can drop it (checkRevoked()). Each is the address its
+// PS3BT recorded with the connection, not Btd.disc_bdaddr: that changes with every incoming
+// connection, so a second controller powering on could put its address there before onInit runs.
 uint8_t footBdaddr[sm::kMacLen] = {};
 uint8_t domeBdaddr[sm::kMacLen] = {};
 uint8_t macChangesSeen = 0;
@@ -1024,11 +1026,11 @@ void onInitPS3NavFoot() {
     output += getLastConnectedBtMAC();
 #endif
 
-    if (mapStore.macAllows(sm::Ctrl::F, Btd.disc_bdaddr)) {
+    if (mapStore.macAllows(sm::Ctrl::F, PS3NavFoot->getBdaddr())) {
 #ifdef SHADOW_DEBUG
         output += "\r\nWe have our FOOT controller connected.\r\n";
 #endif
-        memcpy(footBdaddr, Btd.disc_bdaddr, sm::kMacLen);
+        memcpy(footBdaddr, PS3NavFoot->getBdaddr(), sm::kMacLen);
         mainControllerConnected = true;
         WaitingforReconnect = true;
     } else {
@@ -1036,7 +1038,7 @@ void onInitPS3NavFoot() {
 #ifdef SHADOW_DEBUG
         output += "\r\nWe have an invalid controller trying to connect as tha FOOT controller, it will be dropped.\r\n";
 #endif
-        mapProtocol.noteRefused(sm::Ctrl::F, Btd.disc_bdaddr);
+        mapProtocol.noteRefused(sm::Ctrl::F, PS3NavFoot->getBdaddr());
         dropFoot();
     }
 }
@@ -1050,11 +1052,11 @@ void onInitPS3NavDome() {
     isSecondaryPS3NavigatonInitialized = true;
     badPS3Data = 0;
 
-    if (mapStore.macAllows(sm::Ctrl::D, Btd.disc_bdaddr)) {
+    if (mapStore.macAllows(sm::Ctrl::D, PS3NavDome->getBdaddr())) {
 #ifdef SHADOW_DEBUG
         output += "\r\nWe have our DOME controller connected.\r\n";
 #endif
-        memcpy(domeBdaddr, Btd.disc_bdaddr, sm::kMacLen);
+        memcpy(domeBdaddr, PS3NavDome->getBdaddr(), sm::kMacLen);
         domeControllerConnected = true;
         WaitingforReconnectDome = true;
     } else {
@@ -1062,7 +1064,7 @@ void onInitPS3NavDome() {
 #ifdef SHADOW_DEBUG
         output += "\r\nWe have an invalid controller trying to connect as the DOME controller, it will be dropped.\r\n";
 #endif
-        mapProtocol.noteRefused(sm::Ctrl::D, Btd.disc_bdaddr);
+        mapProtocol.noteRefused(sm::Ctrl::D, PS3NavDome->getBdaddr());
         dropDome();
     }
 }

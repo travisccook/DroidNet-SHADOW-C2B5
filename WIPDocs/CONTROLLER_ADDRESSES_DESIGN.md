@@ -97,7 +97,10 @@ order F, D, F2, D2, ending at `0xF94`:
 
 - `MapStore` (in `lib/ShadowMap`, no Arduino dependency, so it tests on the host) holds, through
   `setBuiltInMac()`, `macFor()` and `macAllows()`, the effective address of each slot: the EEPROM
-  record when it's set, else the build's address. `macAllows(role, bdaddr)` compares raw bytes with `Btd.disc_bdaddr` (least significant byte first):
+  record when it's set, else the build's address. `macAllows(role, bdaddr)` compares raw bytes with the address the controller's `PS3BT` recorded
+  when it claimed the connection (`getBdaddr()`, from the Connection Complete event; least significant
+  byte first). Not `Btd.disc_bdaddr`: every incoming connection request overwrites that, and `onInit`
+  runs about 2 s after the claim, so two controllers powering on together could swap addresses:
   the foot role accepts F or F2, the dome role D or D2, as today. An empty slot matches nothing.
 - The build's addresses come from `include/controller_macs.h`, parsed once at boot by
   `sm::parseMac()` (`lib/ShadowMap/src/sm_mac.h`; the protocol uses it too, and the library can't
@@ -153,7 +156,7 @@ Test-first, on the host (`native`) and the emulated Mega (`simavr`):
 - Records: write, read back, CRC failure, erased, unknown state, power cut mid-write (a torn record
   reads as not set), `default` erasing, `DEFAULTS` leaving them alone, survives `begin()`.
 - `MapStore::macFor()` / `macAllows()`: precedence (EEPROM over build, `-` blocking a built-in address), role matching
-  (F/F2 for foot, D/D2 for dome), byte order against `disc_bdaddr`, empty slots matching nothing.
+  (F/F2 for foot, D/D2 for dome), byte order against the library's (least significant byte first), empty slots matching nothing.
 - Protocol: each `MAC` form and its reply, `ERR args`, `ERR addr`, `ERR busy`, CRC rules per port,
   `REFUSED` on USB without `EVENTS`, on WCB only with `EVENTS 1`, newest refusal wins.
 - Revocation: a change that removes a connected controller's address drops it; one that doesn't,
